@@ -7,10 +7,62 @@
   <title>Darkside Settings</title>
 </head>
 <body>
-  <div class="container">
-    <h1>Darkside Settings</h1>
-    <p id="placeholder">Settings will be available in a future update.</p>
-  </div>
+  <main class="container">
+    <header class="page-header">
+      <h1>Darkside Settings</h1>
+      <p class="page-subtitle">Configure providers, credentials, models, and defaults.</p>
+    </header>
+
+    <form id="settings-form">
+      <section class="card">
+        <h2>Defaults</h2>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">Default provider</span>
+            <select id="default-provider" required></select>
+          </label>
+          <label class="field checkbox-field">
+            <input type="checkbox" id="sync-popup-model" checked>
+            <span>Sync popup model to default provider model on save</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Provider Settings</h2>
+        <div id="provider-settings" class="provider-settings"></div>
+      </section>
+
+      <section class="card">
+        <h2>Custom Endpoint</h2>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">Endpoint URL</span>
+            <input id="custom-endpoint-url" type="url" placeholder="https://api.example.com/v1/chat/completions">
+          </label>
+          <label class="field">
+            <span class="field-label">Custom model</span>
+            <input id="custom-model" type="text" placeholder="your-model-id">
+          </label>
+          <label class="field">
+            <span class="field-label">Custom API key</span>
+            <input id="custom-api-key" type="password" autocomplete="off" placeholder="sk-...">
+          </label>
+          <label class="field full-width">
+            <span class="field-label">Custom headers (JSON object)</span>
+            <textarea id="custom-headers" rows="5" placeholder='{"x-api-key": "..."}'></textarea>
+          </label>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button type="submit" class="button primary">Save settings</button>
+        <button type="button" id="reset-btn" class="button">Reset</button>
+        <p id="status" role="status" aria-live="polite"></p>
+      </div>
+    </form>
+  </main>
+
   <script src="options.js"></script>
 </body>
 </html>
