@@ -69,6 +69,25 @@ function getDefaultSettings() {
     provider: 'openai',
     models: {},
     apiKeys: {},
+    authModes: {
+      openai: 'apiKey',
+      anthropic: 'apiKey',
+      google: 'apiKey',
+    },
+    oauth: {
+      openai: {
+        connected: false,
+        accessToken: '',
+      },
+      anthropic: {
+        connected: false,
+        accessToken: '',
+      },
+      google: {
+        connected: false,
+        accessToken: '',
+      },
+    },
     customEndpoint: {
       url: '',
       model: '',
@@ -90,6 +109,26 @@ async function readLlmSettings() {
     apiKeys: {
       ...getDefaultSettings().apiKeys,
       ...((llmSettings && llmSettings.apiKeys) || {}),
+    },
+    authModes: {
+      ...getDefaultSettings().authModes,
+      ...((llmSettings && llmSettings.authModes) || {}),
+    },
+    oauth: {
+      ...getDefaultSettings().oauth,
+      ...((llmSettings && llmSettings.oauth) || {}),
+      openai: {
+        ...getDefaultSettings().oauth.openai,
+        ...(((llmSettings && llmSettings.oauth) || {}).openai || {}),
+      },
+      anthropic: {
+        ...getDefaultSettings().oauth.anthropic,
+        ...(((llmSettings && llmSettings.oauth) || {}).anthropic || {}),
+      },
+      google: {
+        ...getDefaultSettings().oauth.google,
+        ...(((llmSettings && llmSettings.oauth) || {}).google || {}),
+      },
     },
     customEndpoint: {
       ...getDefaultSettings().customEndpoint,
@@ -125,7 +164,33 @@ function getApiKeyForProvider(provider, settings, apiKeyOverride) {
   return settings.apiKeys[storageKey] || '';
 }
 
-function ensureRequiredConfig(provider, model, apiKey, settings, endpointOverride) {
+function resolveAuthForProvider(provider, settings, apiKeyOverride) {
+  if (provider === 'custom') {
+    return {
+      type: 'apiKey',
+      credential: getApiKeyForProvider(provider, settings, apiKeyOverride),
+    };
+  }
+
+  const authMode =
+    settings.authModes && settings.authModes[provider] === 'oauth' ? 'oauth' : 'apiKey';
+
+  if (provider === 'anthropic' && authMode === 'oauth') {
+    const oauth = settings.oauth && settings.oauth[provider];
+    return {
+      type: 'oauth',
+      connected: Boolean(oauth && oauth.connected),
+      credential: oauth && typeof oauth.accessToken === 'string' ? oauth.accessToken : '',
+    };
+  }
+
+  return {
+    type: 'apiKey',
+    credential: getApiKeyForProvider(provider, settings, apiKeyOverride),
+  };
+}
+
+function ensureRequiredConfig(provider, model, auth, settings, endpointOverride) {
   if (!model) {
     throw new Error(`No model configured for provider "${provider}"`);
   }
@@ -138,7 +203,17 @@ function ensureRequiredConfig(provider, model, apiKey, settings, endpointOverrid
     return;
   }
 
-  if (!apiKey) {
+  if (provider === 'anthropic' && auth.type === 'oauth') {
+    if (!auth.connected) {
+      throw new Error('Anthropic OAuth is selected but not connected');
+    }
+    if (!auth.credential) {
+      throw new Error('Anthropic OAuth is selected but access token is missing');
+    }
+    return;
+  }
+
+  if (!auth.credential) {
     throw new Error(`Missing API key for provider "${provider}"`);
   }
 }
@@ -180,7 +255,7 @@ async function requestOpenAiLikeCompletion({
 
 async function requestAnthropicCompletion({
   endpoint,
-  apiKey,
+  auth,
   model,
   messages,
   temperature,
@@ -198,7 +273,9 @@ async function requestAnthropicCompletion({
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': apiKey,
+      ...(auth.type === 'oauth'
+        ? { authorization: `Bearer ${auth.credential}` }
+        : { 'x-api-key': auth.credential }),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -279,7 +356,7 @@ export async function completeLlmRequest(request = {}) {
   const settings = await readLlmSettings();
   const provider = resolveProvider(request.provider || settings.provider);
   const model = getModelForProvider(provider, settings, request.model);
-  const apiKey = getApiKeyForProvider(provider, settings, request.apiKey);
+  const auth = resolveAuthForProvider(provider, settings, request.apiKey);
   const messages = normalizeMessages(request.messages, request.systemPrompt);
   const endpoint =
     request.endpoint ||
@@ -292,7 +369,7 @@ export async function completeLlmRequest(request = {}) {
         }
       : {};
 
-  ensureRequiredConfig(provider, model, apiKey, settings, request.endpoint);
+  ensureRequiredConfig(provider, model, auth, settings, request.endpoint);
 
   if (!messages.length) {
     throw new Error('At least one message is required');
@@ -305,7 +382,7 @@ export async function completeLlmRequest(request = {}) {
         model,
         ...(await requestOpenAiLikeCompletion({
           endpoint,
-          apiKey,
+          apiKey: auth.credential,
           model,
           messages,
           temperature: request.temperature,
@@ -318,7 +395,7 @@ export async function completeLlmRequest(request = {}) {
         model,
         ...(await requestAnthropicCompletion({
           endpoint,
-          apiKey,
+          auth,
           model,
           messages,
           temperature: request.temperature,
@@ -331,7 +408,7 @@ export async function completeLlmRequest(request = {}) {
         model,
         ...(await requestGoogleCompletion({
           endpoint,
-          apiKey,
+          apiKey: auth.credential,
           model,
           messages,
           temperature: request.temperature,
@@ -344,7 +421,7 @@ export async function completeLlmRequest(request = {}) {
         model,
         ...(await requestOpenAiLikeCompletion({
           endpoint,
-          apiKey,
+          apiKey: auth.credential,
           model,
           messages,
           temperature: request.temperature,
