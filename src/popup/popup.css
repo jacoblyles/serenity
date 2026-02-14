@@ -132,6 +132,27 @@ h1 {
   color: #8585aa;
 }
 
+#generate-dark-mode-btn {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #4a4a86;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #2d2d63;
+  color: #f0f0ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#generate-dark-mode-btn:hover {
+  background: #37377a;
+}
+
+#generate-dark-mode-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 #feedback-text {
   resize: vertical;
   min-height: 86px;

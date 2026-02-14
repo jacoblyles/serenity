@@ -1,129 +1,12 @@
-const PROVIDERS = {
-  openai: {
-    label: 'OpenAI',
-    defaultModel: 'gpt-4.1-mini',
-    apiKeyStorageKey: 'openai',
-    supportsOAuth: true,
-  },
-  anthropic: {
-    label: 'Anthropic',
-    defaultModel: 'claude-3-5-sonnet-latest',
-    apiKeyStorageKey: 'anthropic',
-    supportsOAuth: true,
-  },
-  google: {
-    label: 'Google',
-    defaultModel: 'gemini-2.0-flash',
-    apiKeyStorageKey: 'google',
-    supportsOAuth: true,
-  },
-  custom: {
-    label: 'Custom',
-    defaultModel: '',
-    apiKeyStorageKey: 'custom',
-    supportsOAuth: false,
-  },
-};
+import {
+  OAUTH_PROVIDERS,
+  PROVIDER_CONFIG,
+  getDefaultLlmSettings,
+  isHttpsUrl,
+  mergeLlmSettings,
+} from '../shared/llm-settings.js';
 
-const OAUTH_PROVIDERS = ['openai', 'anthropic', 'google'];
-
-function getDefaultLlmSettings() {
-  return {
-    provider: 'openai',
-    models: {
-      openai: PROVIDERS.openai.defaultModel,
-      anthropic: PROVIDERS.anthropic.defaultModel,
-      google: PROVIDERS.google.defaultModel,
-      custom: '',
-    },
-    apiKeys: {
-      openai: '',
-      anthropic: '',
-      google: '',
-      custom: '',
-    },
-    authModes: {
-      openai: 'apiKey',
-      anthropic: 'apiKey',
-      google: 'apiKey',
-    },
-    oauth: {
-      openai: {
-        connected: false,
-        accessToken: '',
-        accountEmail: '',
-        scopes: [],
-        updatedAt: '',
-      },
-      anthropic: {
-        connected: false,
-        accessToken: '',
-        accountEmail: '',
-        scopes: [],
-        updatedAt: '',
-      },
-      google: {
-        connected: false,
-        accessToken: '',
-        accountEmail: '',
-        scopes: [],
-        updatedAt: '',
-      },
-    },
-    customEndpoint: {
-      url: '',
-      model: '',
-      apiKey: '',
-      headers: {},
-    },
-  };
-}
-
-function mergeSettings(rawSettings) {
-  const defaults = getDefaultLlmSettings();
-  const settings = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
-
-  return {
-    ...defaults,
-    ...settings,
-    models: {
-      ...defaults.models,
-      ...(settings.models || {}),
-    },
-    apiKeys: {
-      ...defaults.apiKeys,
-      ...(settings.apiKeys || {}),
-    },
-    authModes: {
-      ...defaults.authModes,
-      ...(settings.authModes || {}),
-    },
-    oauth: {
-      ...defaults.oauth,
-      ...(settings.oauth || {}),
-      openai: {
-        ...defaults.oauth.openai,
-        ...((settings.oauth && settings.oauth.openai) || {}),
-      },
-      anthropic: {
-        ...defaults.oauth.anthropic,
-        ...((settings.oauth && settings.oauth.anthropic) || {}),
-      },
-      google: {
-        ...defaults.oauth.google,
-        ...((settings.oauth && settings.oauth.google) || {}),
-      },
-    },
-    customEndpoint: {
-      ...defaults.customEndpoint,
-      ...(settings.customEndpoint || {}),
-      headers: {
-        ...defaults.customEndpoint.headers,
-        ...(((settings.customEndpoint || {}).headers) || {}),
-      },
-    },
-  };
-}
+const PROVIDERS = PROVIDER_CONFIG;
 
 const ui = {
   form: document.getElementById('settings-form'),
@@ -343,6 +226,9 @@ function collectFromForm() {
     apiKey: ui.customApiKey.value.trim(),
     headers: parseHeadersJson(ui.customHeaders.value),
   };
+  if (next.customEndpoint.url && !isHttpsUrl(next.customEndpoint.url)) {
+    throw new Error('Custom endpoint URL must use HTTPS');
+  }
 
   next.apiKeys.custom = next.customEndpoint.apiKey;
   next.models.custom = next.customEndpoint.model || next.models.custom;
@@ -374,7 +260,7 @@ async function saveSettings(event) {
   }
 
   await chrome.storage.local.set(storageUpdate);
-  state = mergeSettings(next);
+  state = mergeLlmSettings(next);
 
   for (const provider of OAUTH_PROVIDERS) {
     updateOAuthStatus(provider);
@@ -457,7 +343,7 @@ async function init() {
     wireEvents();
 
     const { llmSettings } = await chrome.storage.local.get('llmSettings');
-    state = mergeSettings(llmSettings);
+    state = mergeLlmSettings(llmSettings);
     hydrateForm();
     setStatus('Loaded');
   } catch (error) {

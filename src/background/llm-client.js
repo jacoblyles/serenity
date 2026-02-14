@@ -1,25 +1,4 @@
-const PROVIDER_CONFIG = {
-  openai: {
-    defaultModel: 'gpt-4.1-mini',
-    endpoint: 'https://api.openai.com/v1/chat/completions',
-    apiKeyStorageKey: 'openai',
-  },
-  anthropic: {
-    defaultModel: 'claude-3-5-sonnet-latest',
-    endpoint: 'https://api.anthropic.com/v1/messages',
-    apiKeyStorageKey: 'anthropic',
-  },
-  google: {
-    defaultModel: 'gemini-2.0-flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
-    apiKeyStorageKey: 'google',
-  },
-  custom: {
-    defaultModel: '',
-    endpoint: '',
-    apiKeyStorageKey: 'custom',
-  },
-};
+import { PROVIDER_CONFIG, isHttpsUrl, mergeLlmSettings } from '../shared/llm-settings.js';
 
 function normalizeMessages(messages, systemPrompt) {
   const normalized = [];
@@ -95,77 +74,9 @@ async function parseErrorResponse(response) {
   throw new Error(message);
 }
 
-function getDefaultSettings() {
-  return {
-    provider: 'openai',
-    models: {},
-    apiKeys: {},
-    authModes: {
-      openai: 'apiKey',
-      anthropic: 'apiKey',
-      google: 'apiKey',
-    },
-    oauth: {
-      openai: {
-        connected: false,
-        accessToken: '',
-      },
-      anthropic: {
-        connected: false,
-        accessToken: '',
-      },
-      google: {
-        connected: false,
-        accessToken: '',
-      },
-    },
-    customEndpoint: {
-      url: '',
-      model: '',
-      apiKey: '',
-      headers: {},
-    },
-  };
-}
-
 async function readLlmSettings() {
   const { llmSettings } = await chrome.storage.local.get('llmSettings');
-  return {
-    ...getDefaultSettings(),
-    ...(llmSettings || {}),
-    models: {
-      ...getDefaultSettings().models,
-      ...((llmSettings && llmSettings.models) || {}),
-    },
-    apiKeys: {
-      ...getDefaultSettings().apiKeys,
-      ...((llmSettings && llmSettings.apiKeys) || {}),
-    },
-    authModes: {
-      ...getDefaultSettings().authModes,
-      ...((llmSettings && llmSettings.authModes) || {}),
-    },
-    oauth: {
-      ...getDefaultSettings().oauth,
-      ...((llmSettings && llmSettings.oauth) || {}),
-      openai: {
-        ...getDefaultSettings().oauth.openai,
-        ...(((llmSettings && llmSettings.oauth) || {}).openai || {}),
-      },
-      anthropic: {
-        ...getDefaultSettings().oauth.anthropic,
-        ...(((llmSettings && llmSettings.oauth) || {}).anthropic || {}),
-      },
-      google: {
-        ...getDefaultSettings().oauth.google,
-        ...(((llmSettings && llmSettings.oauth) || {}).google || {}),
-      },
-    },
-    customEndpoint: {
-      ...getDefaultSettings().customEndpoint,
-      ...((llmSettings && llmSettings.customEndpoint) || {}),
-    },
-  };
+  return mergeLlmSettings(llmSettings);
 }
 
 function resolveProvider(provider) {
@@ -230,6 +141,9 @@ function ensureRequiredConfig(provider, model, auth, settings, endpointOverride)
     const endpoint = endpointOverride || settings.customEndpoint.url;
     if (!endpoint) {
       throw new Error('No custom endpoint URL configured');
+    }
+    if (!isHttpsUrl(endpoint)) {
+      throw new Error('Custom endpoint URL must use HTTPS');
     }
     return;
   }
@@ -348,11 +262,12 @@ async function requestGoogleCompletion({
 }) {
   const system = messages.find((msg) => msg.role === 'system')?.content || '';
   const promptMessages = messages.filter((msg) => msg.role !== 'system');
-  const url = `${endpoint}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `${endpoint}/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
       ...(system

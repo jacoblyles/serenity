@@ -5,6 +5,7 @@ const autoLabel = document.getElementById('auto-toggle-label');
 const modelSelector = document.getElementById('model-selector');
 const modelStrongerBtn = document.getElementById('model-stronger-btn');
 const modelResetBtn = document.getElementById('model-reset-btn');
+const generateDarkModeBtn = document.getElementById('generate-dark-mode-btn');
 const modelHint = document.getElementById('model-hint');
 const feedbackText = document.getElementById('feedback-text');
 const feedbackImageBtn = document.getElementById('feedback-image-btn');
@@ -13,6 +14,7 @@ const feedbackImageList = document.getElementById('feedback-image-list');
 const status = document.getElementById('status');
 let feedbackSaveTimer = null;
 let feedbackImages = [];
+let isGenerating = false;
 
 const DEFAULT_MODEL = 'gpt-4.1-mini';
 const MAX_FEEDBACK_IMAGES = 3;
@@ -46,6 +48,12 @@ function setSelectedModel(model) {
   const normalizedModel = normalizeModel(model);
   modelSelector.value = normalizedModel;
   updateModelHint();
+}
+
+function setGenerateInFlight(inFlight) {
+  isGenerating = inFlight;
+  generateDarkModeBtn.disabled = inFlight;
+  generateDarkModeBtn.textContent = inFlight ? 'Generating...' : 'Generate dark mode';
 }
 
 async function init() {
@@ -152,6 +160,50 @@ modelResetBtn.addEventListener('click', async () => {
 
   setSelectedModel(DEFAULT_MODEL);
   await saveState({ selectedModel: DEFAULT_MODEL });
+});
+
+generateDarkModeBtn.addEventListener('click', async () => {
+  if (isGenerating) return;
+
+  setGenerateInFlight(true);
+  status.textContent = 'Generating dark mode...';
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    if (!Number.isInteger(activeTab?.id)) {
+      throw new Error('No active tab available');
+    }
+
+    const result = await chrome.runtime.sendMessage({
+      type: 'generate-dark-mode',
+      tabId: activeTab.id,
+      model: normalizeModel(modelSelector.value),
+    });
+
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+    if (!result?.css) {
+      throw new Error('No CSS was generated');
+    }
+
+    const saved = await chrome.runtime.sendMessage({
+      type: 'save-stored-style',
+      url: activeTab.url,
+      css: result.css,
+      scope: 'domain',
+    });
+    if (!saved?.ok) {
+      throw new Error(saved?.error || 'Generated CSS but could not save it');
+    }
+
+    status.textContent = 'Generated and saved';
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : 'Failed to generate dark mode';
+  } finally {
+    setGenerateInFlight(false);
+  }
 });
 
 function sanitizeFeedbackImages(images) {

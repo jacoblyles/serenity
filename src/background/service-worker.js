@@ -1,4 +1,4 @@
-// Darkside background service worker
+// Serenity background service worker
 // Handles messaging between popup/content scripts and LLM providers
 
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
@@ -52,7 +52,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   const handler = handlers[message.type];
   if (handler) {
-    handler(message, sender).then(sendResponse);
+    Promise.resolve()
+      .then(() => handler(message, sender))
+      .then((response) => sendResponse(response))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      });
     return true; // keep channel open for async response
   }
 });
@@ -265,7 +273,7 @@ async function maybeAutoGenerateForTab(tabId, url, selectedModel) {
 
     const saved = await handleSaveStoredStyle({ url, css: result.css, scope: 'domain' });
     if (!saved?.ok) {
-      console.warn('Darkside auto-mode: failed to store generated CSS', saved?.error || 'Unknown error');
+      console.warn('Serenity auto-mode: failed to store generated CSS', saved?.error || 'Unknown error');
     }
   } finally {
     inFlightAutoGeneration.delete(dedupeKey);

@@ -1,7 +1,7 @@
-// Darkside content script
+// Serenity content script
 // Injected into all pages; handles style extraction and CSS injection
 
-const STYLE_ELEMENT_ID = 'darkside-styles';
+const STYLE_ELEMENT_ID = 'serenity-styles';
 const MAX_NODES = 500;
 const MAX_DEPTH = 6;
 const MAX_CHILDREN_PER_NODE = 25;
@@ -93,7 +93,7 @@ function extractDOM() {
   function getVisibleText(el) {
     if (FORM_TAGS.has(el.tagName)) return null;
 
-    const text = normalizeText(el.textContent || '');
+    const text = normalizeText(el.innerText || '');
     if (!text) return null;
     return truncateText(text, MAX_TEXT_LENGTH);
   }
