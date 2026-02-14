@@ -4,6 +4,7 @@
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
 
 const STYLE_STORAGE_KEY = 'darkModeStyles';
+const inFlightAutoGeneration = new Set();
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
@@ -178,7 +179,159 @@ async function handleGenerateDarkMode(message, sender) {
   if (tabId === null) {
     return { css: null, error: 'No active tab available for generation' };
   }
+  return generateAndApplyDarkMode(tabId, message);
+}
 
+async function handleRefineDarkMode(message, sender) {
+  // Placeholder: will be implemented in darkside2-b53.8
+  return { css: null, error: 'Not yet implemented' };
+}
+
+async function handleLlmComplete(message) {
+  try {
+    const result = await completeLlmRequest(message.request || {});
+    return { ok: true, result };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+async function handleLlmProviders() {
+  return { providers: listSupportedProviders() };
+}
+
+async function loadStyleStorage() {
+  const data = await chrome.storage.local.get(STYLE_STORAGE_KEY);
+  if (!isObject(data[STYLE_STORAGE_KEY])) return {};
+  return data[STYLE_STORAGE_KEY];
+}
+
+async function getStoredStyleForUrl(rawUrl) {
+  const parsed = parseURL(rawUrl);
+  if (!parsed) return { css: null, scope: null, found: false };
+
+  const styles = await loadStyleStorage();
+  return getStoredStyleForParsedUrl(parsed, styles);
+}
+
+async function syncTabRememberedStyle(tabId, url) {
+  if (typeof tabId !== 'number') return;
+
+  const { enabled, autoMode, selectedModel } = await chrome.storage.local.get([
+    'enabled',
+    'autoMode',
+    'selectedModel',
+  ]);
+  if (!enabled) {
+    await removeCssFromTab(tabId);
+    return;
+  }
+
+  const parsed = parseURL(url);
+  if (!parsed) {
+    await removeCssFromTab(tabId);
+    return;
+  }
+
+  const styles = await loadStyleStorage();
+  const stored = getStoredStyleForParsedUrl(parsed, styles);
+  if (stored.found && typeof stored.css === 'string') {
+    await sendMessageToTab(tabId, { type: 'apply-css', css: stored.css });
+    return;
+  }
+
+  if (autoMode && shouldAutoGenerateForDomain(parsed.domain, styles)) {
+    await maybeAutoGenerateForTab(tabId, url, selectedModel);
+    return;
+  }
+
+  await removeCssFromTab(tabId);
+}
+
+async function maybeAutoGenerateForTab(tabId, url, selectedModel) {
+  const dedupeKey = `${tabId}:${url}`;
+  if (inFlightAutoGeneration.has(dedupeKey)) return;
+
+  inFlightAutoGeneration.add(dedupeKey);
+  try {
+    const result = await generateAndApplyDarkMode(tabId, {
+      model: typeof selectedModel === 'string' ? selectedModel : undefined,
+    });
+    if (!result?.css || result.error) return;
+
+    const saved = await handleSaveStoredStyle({ url, css: result.css, scope: 'domain' });
+    if (!saved?.ok) {
+      console.warn('Darkside auto-mode: failed to store generated CSS', saved?.error || 'Unknown error');
+    }
+  } finally {
+    inFlightAutoGeneration.delete(dedupeKey);
+  }
+}
+
+async function removeCssFromTab(tabId) {
+  if (typeof tabId !== 'number') return;
+  await sendMessageToTab(tabId, { type: 'remove-css' });
+}
+
+async function sendMessageToTab(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    // Ignore tabs without our content script (e.g. chrome:// pages).
+  }
+}
+
+function shouldAutoGenerateForDomain(domain, styles) {
+  if (typeof domain !== 'string' || !domain) return false;
+  if (!isObject(styles)) return true;
+  return !Object.hasOwn(styles, domain);
+}
+
+function parseURL(rawUrl) {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
+
+  try {
+    const url = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    if (!url.hostname) return null;
+
+    const domain = url.hostname.toLowerCase();
+    const path = url.pathname || '/';
+    const query = url.search || '';
+    const page = `${path}${query}`;
+    return { domain, page };
+  } catch {
+    return null;
+  }
+}
+
+function getStoredStyleForParsedUrl(parsed, styles) {
+  const domainEntry = styles[parsed.domain];
+  if (!domainEntry) return { css: null, scope: null, found: false };
+
+  const pageCss = domainEntry.pages?.[parsed.page];
+  if (typeof pageCss === 'string') {
+    return { css: pageCss, scope: 'page', found: true };
+  }
+
+  if (typeof domainEntry.css === 'string') {
+    return { css: domainEntry.css, scope: 'domain', found: true };
+  }
+
+  return { css: null, scope: null, found: false };
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function resolveTabId(message, sender) {
+  if (Number.isInteger(message?.tabId)) return message.tabId;
+  if (Number.isInteger(sender?.tab?.id)) return sender.tab.id;
+  return null;
+}
+
+async function generateAndApplyDarkMode(tabId, options = {}) {
   let pageContext;
   try {
     pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
@@ -187,10 +340,10 @@ async function handleGenerateDarkMode(message, sender) {
   }
 
   const request = {
-    provider: typeof message.provider === 'string' ? message.provider : undefined,
-    model: typeof message.model === 'string' ? message.model : undefined,
-    temperature: typeof message.temperature === 'number' ? message.temperature : 0.2,
-    maxTokens: typeof message.maxTokens === 'number' ? message.maxTokens : 1500,
+    provider: typeof options.provider === 'string' ? options.provider : undefined,
+    model: typeof options.model === 'string' ? options.model : undefined,
+    temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
+    maxTokens: typeof options.maxTokens === 'number' ? options.maxTokens : 1500,
     systemPrompt: buildDarkModeSystemPrompt(),
     messages: [
       {
@@ -226,108 +379,6 @@ async function handleGenerateDarkMode(message, sender) {
     truncatedContext: Boolean(pageContext?.truncated),
     nodeCount: pageContext?.nodeCount || 0,
   };
-}
-
-async function handleRefineDarkMode(message, sender) {
-  // Placeholder: will be implemented in darkside2-b53.8
-  return { css: null, error: 'Not yet implemented' };
-}
-
-async function handleLlmComplete(message) {
-  try {
-    const result = await completeLlmRequest(message.request || {});
-    return { ok: true, result };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
-  }
-}
-
-async function handleLlmProviders() {
-  return { providers: listSupportedProviders() };
-}
-
-async function loadStyleStorage() {
-  const data = await chrome.storage.local.get(STYLE_STORAGE_KEY);
-  if (!isObject(data[STYLE_STORAGE_KEY])) return {};
-  return data[STYLE_STORAGE_KEY];
-}
-
-async function getStoredStyleForUrl(rawUrl) {
-  const parsed = parseURL(rawUrl);
-  if (!parsed) return { css: null, scope: null, found: false };
-
-  const styles = await loadStyleStorage();
-  const domainEntry = styles[parsed.domain];
-  if (!domainEntry) return { css: null, scope: null, found: false };
-
-  const pageCss = domainEntry.pages?.[parsed.page];
-  if (typeof pageCss === 'string') {
-    return { css: pageCss, scope: 'page', found: true };
-  }
-
-  if (typeof domainEntry.css === 'string') {
-    return { css: domainEntry.css, scope: 'domain', found: true };
-  }
-
-  return { css: null, scope: null, found: false };
-}
-
-async function syncTabRememberedStyle(tabId, url) {
-  if (typeof tabId !== 'number') return;
-
-  const { enabled } = await chrome.storage.local.get('enabled');
-  if (!enabled) {
-    await removeCssFromTab(tabId);
-    return;
-  }
-
-  const stored = await getStoredStyleForUrl(url);
-  if (stored.found && typeof stored.css === 'string') {
-    await sendMessageToTab(tabId, { type: 'apply-css', css: stored.css });
-    return;
-  }
-
-  await removeCssFromTab(tabId);
-}
-
-async function removeCssFromTab(tabId) {
-  if (typeof tabId !== 'number') return;
-  await sendMessageToTab(tabId, { type: 'remove-css' });
-}
-
-async function sendMessageToTab(tabId, message) {
-  try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch {
-    // Ignore tabs without our content script (e.g. chrome:// pages).
-  }
-}
-
-function parseURL(rawUrl) {
-  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
-
-  try {
-    const url = new URL(rawUrl);
-    if (!url.hostname) return null;
-
-    const domain = url.hostname.toLowerCase();
-    const path = url.pathname || '/';
-    const query = url.search || '';
-    const page = `${path}${query}`;
-    return { domain, page };
-  } catch {
-    return null;
-  }
-}
-
-function isObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function resolveTabId(message, sender) {
-  if (Number.isInteger(message?.tabId)) return message.tabId;
-  if (Number.isInteger(sender?.tab?.id)) return sender.tab.id;
-  return null;
 }
 
 function buildDarkModeSystemPrompt() {
