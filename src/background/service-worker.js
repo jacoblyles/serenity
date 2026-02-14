@@ -166,8 +166,58 @@ async function handleSetPopupState(message) {
 }
 
 async function handleGenerateDarkMode(message, sender) {
-  // Placeholder: will be implemented in darkside2-b53.4
-  return { css: null, error: 'Not yet implemented' };
+  const tabId = resolveTabId(message, sender);
+  if (tabId === null) {
+    return { css: null, error: 'No active tab available for generation' };
+  }
+
+  let pageContext;
+  try {
+    pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
+  } catch (_error) {
+    return { css: null, error: 'Unable to extract page context from content script' };
+  }
+
+  const request = {
+    provider: typeof message.provider === 'string' ? message.provider : undefined,
+    model: typeof message.model === 'string' ? message.model : undefined,
+    temperature: typeof message.temperature === 'number' ? message.temperature : 0.2,
+    maxTokens: typeof message.maxTokens === 'number' ? message.maxTokens : 1500,
+    systemPrompt: buildDarkModeSystemPrompt(),
+    messages: [
+      {
+        role: 'user',
+        content: buildDarkModeUserPrompt(pageContext),
+      },
+    ],
+  };
+
+  let llmResult;
+  try {
+    llmResult = await completeLlmRequest(request);
+  } catch (error) {
+    return { css: null, error: error instanceof Error ? error.message : 'Failed to generate CSS' };
+  }
+
+  const css = extractCssFromModelText(llmResult.text || '');
+  if (!css) {
+    return { css: null, error: 'Provider response did not contain valid CSS' };
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'apply-css', css });
+  } catch (_error) {
+    return { css: null, error: 'Generated CSS, but failed to apply it to the page' };
+  }
+
+  return {
+    css,
+    applied: true,
+    provider: llmResult.provider,
+    model: llmResult.model,
+    truncatedContext: Boolean(pageContext?.truncated),
+    nodeCount: pageContext?.nodeCount || 0,
+  };
 }
 
 async function handleRefineDarkMode(message, sender) {
@@ -213,4 +263,86 @@ function parseURL(rawUrl) {
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function resolveTabId(message, sender) {
+  if (Number.isInteger(message?.tabId)) return message.tabId;
+  if (Number.isInteger(sender?.tab?.id)) return sender.tab.id;
+  return null;
+}
+
+function buildDarkModeSystemPrompt() {
+  return [
+    'You are a CSS-only assistant.',
+    'Generate dark mode CSS for the provided webpage context.',
+    'Return CSS only. Do not include Markdown or explanations.',
+    'Preserve readability and contrast while minimizing layout changes.',
+    'Prefer scoped overrides on common selectors and avoid !important unless necessary.',
+  ].join(' ');
+}
+
+function buildDarkModeUserPrompt(pageContext) {
+  const safeContext = sanitizePageContext(pageContext);
+  const contextJson = JSON.stringify(safeContext);
+
+  return [
+    'Create CSS that applies a visually pleasing dark theme to this page context.',
+    'Goals:',
+    '- Darken page backgrounds while preserving hierarchy.',
+    '- Use light text with sufficient contrast.',
+    '- Keep links/buttons distinguishable and accessible.',
+    '- Handle forms, tables, cards, and code blocks when present.',
+    '- Do not hide content or change spacing/layout dramatically.',
+    'Page context JSON:',
+    contextJson,
+  ].join('\n');
+}
+
+function sanitizePageContext(pageContext) {
+  if (!isObject(pageContext)) {
+    return {
+      url: '',
+      title: '',
+      nodeCount: 0,
+      truncated: true,
+      dom: null,
+    };
+  }
+
+  return {
+    url: typeof pageContext.url === 'string' ? pageContext.url : '',
+    hostname: typeof pageContext.hostname === 'string' ? pageContext.hostname : '',
+    title: typeof pageContext.title === 'string' ? pageContext.title : '',
+    viewport: isObject(pageContext.viewport)
+      ? {
+          width: Number.isFinite(pageContext.viewport.width) ? pageContext.viewport.width : null,
+          height: Number.isFinite(pageContext.viewport.height) ? pageContext.viewport.height : null,
+        }
+      : null,
+    nodeCount: Number.isFinite(pageContext.nodeCount) ? pageContext.nodeCount : 0,
+    truncated: Boolean(pageContext.truncated),
+    dom: pageContext.dom || null,
+  };
+}
+
+function extractCssFromModelText(text) {
+  if (typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+
+  const fenced = trimmed.match(/```(?:css)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced ? fenced[1] : trimmed).trim();
+  if (!candidate) return '';
+
+  const normalized = candidate
+    .replace(/^\s*<style[^>]*>/i, '')
+    .replace(/<\/style>\s*$/i, '')
+    .trim();
+
+  if (!looksLikeCss(normalized)) return '';
+  return normalized;
+}
+
+function looksLikeCss(text) {
+  return /[.#:]?[a-zA-Z][a-zA-Z0-9_:\-#.*\s>,+~[\]="'()]*\{[^{}]*\}/.test(text);
 }
