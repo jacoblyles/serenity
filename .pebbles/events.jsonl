@@ -106,3 +106,13 @@
 {"type":"close","timestamp":"2026-02-14T05:01:57.274041Z","issue_id":"darkside2-b53.13","payload":{}}
 {"type":"close","timestamp":"2026-02-14T05:02:11.800904Z","issue_id":"darkside2-b53.13","payload":{}}
 {"type":"close","timestamp":"2026-02-14T05:02:11.866628Z","issue_id":"darkside2-b53","payload":{}}
+{"type":"create","timestamp":"2026-02-14T13:11:39.829914Z","issue_id":"darkside2-1e4","payload":{"description":"","priority":"1","title":"Fix unhandled promise rejection in service worker message listener","type":"bug"}}
+{"type":"create","timestamp":"2026-02-14T13:11:39.904483Z","issue_id":"darkside2-f8f","payload":{"description":"","priority":"1","title":"Move Google API key from URL query param to header","type":"bug"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.021607Z","issue_id":"darkside2-eea","payload":{"description":"","priority":"2","title":"Use innerText instead of textContent in DOM extraction","type":"bug"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.099219Z","issue_id":"darkside2-58e","payload":{"description":"","priority":"2","title":"Validate custom endpoint URLs are HTTPS","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.204705Z","issue_id":"darkside2-e99","payload":{"description":"","priority":"2","title":"Extract shared provider config and settings merge into common module","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.324821Z","issue_id":"darkside2-42a","payload":{"description":"","priority":"3","title":"Split service-worker.js into focused modules","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.413958Z","issue_id":"darkside2-f63","payload":{"description":"","priority":"2","title":"Add generate dark mode button to popup UI","type":"feature"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.491233Z","issue_id":"darkside2-d13","payload":{"description":"","priority":"1","title":"Rename extension from Darkside to Serenity","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.555114Z","issue_id":"darkside2-959","payload":{"description":"","priority":"3","title":"Add eslint config and web-ext dev setup","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T13:11:40.670524Z","issue_id":"darkside2-f7a","payload":{"description":"","priority":"3","title":"Add loading and error states to popup UI","type":"task"}}
