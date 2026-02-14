@@ -1,0 +1,57 @@
+{"type":"create","timestamp":"2026-02-14T04:33:23.831453Z","issue_id":"darkside2-b53","payload":{"description":"","priority":"1","title":"Darkside Chrome Extension","type":"epic"}}
+{"type":"create","timestamp":"2026-02-14T04:33:35.957957Z","issue_id":"darkside2-b18","payload":{"description":"","priority":"1","title":"Project scaffolding: Manifest V3, popup, background worker, content script","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:35.980981Z","issue_id":"darkside2-a41","payload":{"description":"","priority":"1","title":"Content script: extract DOM structure + computed styles (sanitized, no form values)","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.004839Z","issue_id":"darkside2-ad5","payload":{"description":"","priority":"1","title":"LLM abstraction layer: unified interface for Anthropic, OpenAI, Google, custom endpoints","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.028846Z","issue_id":"darkside2-3a3","payload":{"description":"","priority":"1","title":"Dark mode CSS generation: send page context to LLM, parse and apply returned CSS","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.055968Z","issue_id":"darkside2-697","payload":{"description":"","priority":"1","title":"Style storage: save/load dark mode CSS per-domain with page-level overrides in chrome.storage","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.081401Z","issue_id":"darkside2-135","payload":{"description":"","priority":"2","title":"Popup UI: toggle button, auto-mode toggle, feedback textbox, model selector","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.106747Z","issue_id":"darkside2-0e5","payload":{"description":"","priority":"2","title":"Settings page: manage LLM providers, API keys, OAuth, models, set defaults","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.131536Z","issue_id":"darkside2-744","payload":{"description":"","priority":"2","title":"Feedback loop: send user feedback + current CSS to LLM for refinement","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.157037Z","issue_id":"darkside2-e3f","payload":{"description":"","priority":"2","title":"Auto mode: detect new sites, auto-generate and apply dark mode on page load","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.185112Z","issue_id":"darkside2-9f6","payload":{"description":"","priority":"2","title":"Anthropic OAuth flow integration","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.216022Z","issue_id":"darkside2-f0e","payload":{"description":"","priority":"1","title":"Apply remembered dark mode styles on page load for known domains","type":"task"}}
+{"type":"create","timestamp":"2026-02-14T04:33:36.24499Z","issue_id":"darkside2-826","payload":{"description":"","priority":"3","title":"Quick model switch from popup for retrying difficult sites with stronger models","type":"task"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.362175Z","issue_id":"darkside2-b18","payload":{"new_id":"darkside2-b53.1"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.362178Z","issue_id":"darkside2-b53.1","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.399941Z","issue_id":"darkside2-a41","payload":{"new_id":"darkside2-b53.2"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.399944Z","issue_id":"darkside2-b53.2","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.438941Z","issue_id":"darkside2-ad5","payload":{"new_id":"darkside2-b53.3"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.438945Z","issue_id":"darkside2-b53.3","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.476246Z","issue_id":"darkside2-3a3","payload":{"new_id":"darkside2-b53.4"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.47625Z","issue_id":"darkside2-b53.4","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.517944Z","issue_id":"darkside2-697","payload":{"new_id":"darkside2-b53.5"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.51795Z","issue_id":"darkside2-b53.5","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.560361Z","issue_id":"darkside2-135","payload":{"new_id":"darkside2-b53.6"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.560365Z","issue_id":"darkside2-b53.6","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.600905Z","issue_id":"darkside2-0e5","payload":{"new_id":"darkside2-b53.7"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.600909Z","issue_id":"darkside2-b53.7","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.648774Z","issue_id":"darkside2-744","payload":{"new_id":"darkside2-b53.8"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.648778Z","issue_id":"darkside2-b53.8","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.693699Z","issue_id":"darkside2-e3f","payload":{"new_id":"darkside2-b53.9"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.693703Z","issue_id":"darkside2-b53.9","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.737101Z","issue_id":"darkside2-9f6","payload":{"new_id":"darkside2-b53.10"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.737104Z","issue_id":"darkside2-b53.10","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.813021Z","issue_id":"darkside2-f0e","payload":{"new_id":"darkside2-b53.11"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.813026Z","issue_id":"darkside2-b53.11","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"rename","timestamp":"2026-02-14T04:33:42.870621Z","issue_id":"darkside2-826","payload":{"new_id":"darkside2-b53.12"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:42.870626Z","issue_id":"darkside2-b53.12","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.666542Z","issue_id":"darkside2-b53.2","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.1"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.705794Z","issue_id":"darkside2-b53.3","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.1"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.756936Z","issue_id":"darkside2-b53.4","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.2"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.795585Z","issue_id":"darkside2-b53.4","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.3"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.837606Z","issue_id":"darkside2-b53.5","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.1"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.889577Z","issue_id":"darkside2-b53.6","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.1"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.931059Z","issue_id":"darkside2-b53.7","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.1"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:50.974029Z","issue_id":"darkside2-b53.8","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.4"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.035402Z","issue_id":"darkside2-b53.8","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.6"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.097Z","issue_id":"darkside2-b53.9","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.4"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.159302Z","issue_id":"darkside2-b53.9","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.5"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.203552Z","issue_id":"darkside2-b53.10","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.3"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.246146Z","issue_id":"darkside2-b53.10","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.7"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.286727Z","issue_id":"darkside2-b53.11","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.5"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.333595Z","issue_id":"darkside2-b53.12","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.6"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:33:51.377606Z","issue_id":"darkside2-b53.12","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.7"}}
+{"type":"create","timestamp":"2026-02-14T04:34:46.668901Z","issue_id":"darkside2-050","payload":{"description":"","priority":"2","title":"Image attachment in feedback: allow user to paste/upload screenshots alongside text feedback","type":"task"}}
+{"type":"rename","timestamp":"2026-02-14T04:34:50.368958Z","issue_id":"darkside2-050","payload":{"new_id":"darkside2-b53.13"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:34:50.368962Z","issue_id":"darkside2-b53.13","payload":{"dep_type":"parent-child","depends_on":"darkside2-b53"}}
+{"type":"dep_add","timestamp":"2026-02-14T04:34:50.418748Z","issue_id":"darkside2-b53.13","payload":{"dep_type":"blocks","depends_on":"darkside2-b53.8"}}
