@@ -6,7 +6,12 @@ import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
 const STYLE_STORAGE_KEY = 'darkModeStyles';
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ enabled: false });
+  chrome.storage.local.set({
+    enabled: false,
+    autoMode: false,
+    selectedModel: 'gpt-4.1-mini',
+    feedbackText: '',
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -18,6 +23,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'get-stored-style': handleGetStoredStyle,
     'save-stored-style': handleSaveStoredStyle,
     'delete-stored-style': handleDeleteStoredStyle,
+    'get-popup-state': handleGetPopupState,
+    'set-popup-state': handleSetPopupState,
     'generate-dark-mode': handleGenerateDarkMode,
     'refine-dark-mode': handleRefineDarkMode,
   };
@@ -118,6 +125,44 @@ async function handleDeleteStoredStyle(message, sender) {
 
   await chrome.storage.local.set({ [STYLE_STORAGE_KEY]: styles });
   return { ok: true, deleted, scope };
+}
+
+async function handleGetPopupState() {
+  const state = await chrome.storage.local.get([
+    'enabled',
+    'autoMode',
+    'selectedModel',
+    'feedbackText',
+  ]);
+
+  return {
+    enabled: Boolean(state.enabled),
+    autoMode: Boolean(state.autoMode),
+    selectedModel: state.selectedModel || 'gpt-4.1-mini',
+    feedbackText: state.feedbackText || '',
+  };
+}
+
+async function handleSetPopupState(message) {
+  const update = {};
+  if (typeof message.enabled === 'boolean') {
+    update.enabled = message.enabled;
+  }
+  if (typeof message.autoMode === 'boolean') {
+    update.autoMode = message.autoMode;
+  }
+  if (typeof message.selectedModel === 'string') {
+    update.selectedModel = message.selectedModel;
+  }
+  if (typeof message.feedbackText === 'string') {
+    update.feedbackText = message.feedbackText.slice(0, 500);
+  }
+
+  if (Object.keys(update).length > 0) {
+    await chrome.storage.local.set(update);
+  }
+
+  return handleGetPopupState();
 }
 
 async function handleGenerateDarkMode(message, sender) {
