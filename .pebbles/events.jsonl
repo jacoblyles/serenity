@@ -90,3 +90,11 @@
 {"type":"close","timestamp":"2026-02-14T04:53:31.285195Z","issue_id":"darkside2-b53.4","payload":{}}
 {"type":"close","timestamp":"2026-02-14T04:53:31.339073Z","issue_id":"darkside2-b53.7","payload":{}}
 {"type":"close","timestamp":"2026-02-14T04:53:31.398714Z","issue_id":"darkside2-b53.11","payload":{}}
+{"type":"status_update","timestamp":"2026-02-14T04:53:56.32581Z","issue_id":"darkside2-b53.8","payload":{"status":"in_progress"}}
+{"type":"status_update","timestamp":"2026-02-14T04:53:58.987481Z","issue_id":"darkside2-b53.10","payload":{"status":"in_progress"}}
+{"type":"status_update","timestamp":"2026-02-14T04:54:00.917405Z","issue_id":"darkside2-b53.12","payload":{"status":"in_progress"}}
+{"type":"status_update","timestamp":"2026-02-14T04:54:03.356993Z","issue_id":"darkside2-b53.9","payload":{"status":"in_progress"}}
+{"type":"close","timestamp":"2026-02-14T04:55:18.240967Z","issue_id":"darkside2-b53.8","payload":{}}
+{"type":"close","timestamp":"2026-02-14T04:55:24.101211Z","issue_id":"darkside2-b53.9","payload":{}}
+{"type":"close","timestamp":"2026-02-14T04:55:29.169691Z","issue_id":"darkside2-b53.12","payload":{}}
+{"type":"close","timestamp":"2026-02-14T04:55:42.258561Z","issue_id":"darkside2-b53.10","payload":{}}
