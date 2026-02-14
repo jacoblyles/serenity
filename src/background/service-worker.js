@@ -229,8 +229,73 @@ async function handleGenerateDarkMode(message, sender) {
 }
 
 async function handleRefineDarkMode(message, sender) {
-  // Placeholder: will be implemented in darkside2-b53.8
-  return { css: null, error: 'Not yet implemented' };
+  const tabId = await resolveTabIdWithFallback(message, sender);
+  if (tabId === null) {
+    return { css: null, error: 'No active tab available for refinement' };
+  }
+
+  const feedback = await resolveRefinementFeedback(message);
+  if (!feedback) {
+    return { css: null, error: 'Feedback text is required for refinement' };
+  }
+
+  let pageContext;
+  try {
+    pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
+  } catch (_error) {
+    return { css: null, error: 'Unable to extract page context from content script' };
+  }
+
+  const currentCss = await resolveCurrentCssForRefinement(message, sender, tabId);
+  if (!currentCss) {
+    return { css: null, error: 'No current CSS found to refine' };
+  }
+
+  const request = {
+    provider: typeof message.provider === 'string' ? message.provider : undefined,
+    model: typeof message.model === 'string' ? message.model : undefined,
+    temperature: typeof message.temperature === 'number' ? message.temperature : 0.2,
+    maxTokens: typeof message.maxTokens === 'number' ? message.maxTokens : 1500,
+    systemPrompt: buildRefineSystemPrompt(),
+    messages: [
+      {
+        role: 'user',
+        content: buildRefineUserPrompt({
+          pageContext,
+          currentCss,
+          feedback,
+        }),
+      },
+    ],
+  };
+
+  let llmResult;
+  try {
+    llmResult = await completeLlmRequest(request);
+  } catch (error) {
+    return { css: null, error: error instanceof Error ? error.message : 'Failed to refine CSS' };
+  }
+
+  const css = extractCssFromModelText(llmResult.text || '');
+  if (!css) {
+    return { css: null, error: 'Provider response did not contain valid CSS' };
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'apply-css', css });
+  } catch (_error) {
+    return { css: null, error: 'Refined CSS generated, but failed to apply it to the page' };
+  }
+
+  return {
+    css,
+    applied: true,
+    provider: llmResult.provider,
+    model: llmResult.model,
+    feedbackUsed: feedback,
+    truncatedContext: Boolean(pageContext?.truncated),
+    nodeCount: pageContext?.nodeCount || 0,
+  };
 }
 
 async function handleLlmComplete(message) {
@@ -330,6 +395,21 @@ function resolveTabId(message, sender) {
   return null;
 }
 
+async function resolveTabIdWithFallback(message, sender) {
+  const resolved = resolveTabId(message, sender);
+  if (resolved !== null) return resolved;
+
+  try {
+    const tabs = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    return Number.isInteger(tabs[0]?.id) ? tabs[0].id : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildDarkModeSystemPrompt() {
   return [
     'You are a CSS-only assistant.',
@@ -337,6 +417,16 @@ function buildDarkModeSystemPrompt() {
     'Return CSS only. Do not include Markdown or explanations.',
     'Preserve readability and contrast while minimizing layout changes.',
     'Prefer scoped overrides on common selectors and avoid !important unless necessary.',
+  ].join(' ');
+}
+
+function buildRefineSystemPrompt() {
+  return [
+    'You are a CSS-only assistant.',
+    'Refine an existing dark mode stylesheet using explicit user feedback.',
+    'Return CSS only. Do not include Markdown or explanations.',
+    'Preserve the current layout and only adjust styles needed to satisfy feedback.',
+    'Keep accessibility and contrast strong across text, controls, and interactive states.',
   ].join(' ');
 }
 
@@ -355,6 +445,69 @@ function buildDarkModeUserPrompt(pageContext) {
     'Page context JSON:',
     contextJson,
   ].join('\n');
+}
+
+function buildRefineUserPrompt({ pageContext, currentCss, feedback }) {
+  const safeContext = sanitizePageContext(pageContext);
+  const contextJson = JSON.stringify(safeContext);
+
+  return [
+    'Refine the existing dark mode CSS based on user feedback.',
+    'Requirements:',
+    '- Keep improvements already present unless feedback requests changes.',
+    '- Preserve structure, spacing, and layout behavior.',
+    '- Maintain accessible contrast and visible interactive states.',
+    '- Return a full replacement CSS stylesheet.',
+    'User feedback:',
+    feedback,
+    'Current CSS:',
+    currentCss,
+    'Page context JSON:',
+    contextJson,
+  ].join('\n');
+}
+
+async function resolveRefinementFeedback(message) {
+  if (typeof message?.feedback === 'string') {
+    const fromMessage = message.feedback.trim().slice(0, 500);
+    if (fromMessage) return fromMessage;
+  }
+
+  const { feedbackText } = await chrome.storage.local.get('feedbackText');
+  if (typeof feedbackText !== 'string') return '';
+  return feedbackText.trim().slice(0, 500);
+}
+
+async function resolveCurrentCssForRefinement(message, sender, tabId) {
+  if (typeof message?.currentCss === 'string' && message.currentCss.trim()) {
+    return message.currentCss.trim();
+  }
+
+  try {
+    const applied = await chrome.tabs.sendMessage(tabId, { type: 'get-applied-css' });
+    if (typeof applied?.css === 'string' && applied.css.trim()) {
+      return applied.css.trim();
+    }
+  } catch {
+    // Continue to stored CSS fallback.
+  }
+
+  let tabUrl = sender?.tab?.url;
+  if (!tabUrl) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      tabUrl = tab?.url;
+    } catch {
+      tabUrl = null;
+    }
+  }
+
+  const stored = await getStoredStyleForUrl(tabUrl);
+  if (typeof stored?.css === 'string' && stored.css.trim()) {
+    return stored.css.trim();
+  }
+
+  return '';
 }
 
 function sanitizePageContext(pageContext) {

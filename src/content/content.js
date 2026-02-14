@@ -46,10 +46,16 @@ function removeCSS() {
   if (el) el.remove();
 }
 
+function getInjectedCSS() {
+  const el = document.getElementById(STYLE_ELEMENT_ID);
+  return el?.textContent || '';
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handlers = {
     'apply-css': (msg) => { injectCSS(msg.css); return { applied: true }; },
     'remove-css': () => { removeCSS(); return { removed: true }; },
+    'get-applied-css': () => ({ css: getInjectedCSS() }),
     'extract-dom': () => extractDOM(),
   };
 
