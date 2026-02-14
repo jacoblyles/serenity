@@ -9,13 +9,46 @@
 <body>
   <div class="container">
     <h1>Darkside</h1>
-    <div id="toggle-section">
-      <label class="toggle">
-        <input type="checkbox" id="toggle-dark-mode">
-        <span class="slider"></span>
-      </label>
-      <span id="toggle-label">Off</span>
+    <div class="section">
+      <div class="control-row">
+        <span class="control-label">Dark mode</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-dark-mode">
+          <span class="slider"></span>
+        </label>
+        <span id="toggle-label" class="control-value">Off</span>
+      </div>
+      <div class="control-row">
+        <span class="control-label">Auto mode</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-auto-mode">
+          <span class="slider"></span>
+        </label>
+        <span id="auto-toggle-label" class="control-value">Off</span>
+      </div>
     </div>
+
+    <div class="section">
+      <label for="model-selector" class="field-label">Model</label>
+      <select id="model-selector">
+        <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+        <option value="gpt-4.1">GPT-4.1</option>
+        <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+        <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+      </select>
+    </div>
+
+    <div class="section">
+      <label for="feedback-text" class="field-label">Feedback</label>
+      <textarea
+        id="feedback-text"
+        rows="4"
+        maxlength="500"
+        placeholder="Describe what looks off on this page..."
+      ></textarea>
+      <div id="feedback-hint">Saved locally as you type (max 500 chars)</div>
+    </div>
+
     <div id="status"></div>
   </div>
   <script src="popup.js"></script>
