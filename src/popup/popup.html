@@ -52,6 +52,17 @@
         placeholder="Describe what looks off on this page..."
       ></textarea>
       <div id="feedback-hint">Saved locally as you type (max 500 chars)</div>
+      <div class="attachments-row">
+        <button type="button" id="feedback-image-btn">Attach screenshot</button>
+        <input
+          type="file"
+          id="feedback-image-input"
+          accept="image/*"
+          aria-label="Attach screenshot"
+        >
+      </div>
+      <div id="feedback-image-hint">You can also paste images into the feedback box (up to 3).</div>
+      <div id="feedback-image-list"></div>
     </div>
 
     <div id="status"></div>

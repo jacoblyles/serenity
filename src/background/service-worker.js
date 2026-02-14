@@ -4,6 +4,9 @@
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
 
 const STYLE_STORAGE_KEY = 'darkModeStyles';
+const MAX_FEEDBACK_IMAGES = 3;
+const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
+const MAX_FEEDBACK_IMAGE_NAME_LENGTH = 80;
 const inFlightAutoGeneration = new Set();
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -12,6 +15,7 @@ chrome.runtime.onInstalled.addListener(() => {
     autoMode: false,
     selectedModel: 'gpt-4.1-mini',
     feedbackText: '',
+    feedbackImages: [],
   });
 });
 
@@ -142,6 +146,7 @@ async function handleGetPopupState() {
     'autoMode',
     'selectedModel',
     'feedbackText',
+    'feedbackImages',
   ]);
 
   return {
@@ -149,6 +154,7 @@ async function handleGetPopupState() {
     autoMode: Boolean(state.autoMode),
     selectedModel: state.selectedModel || 'gpt-4.1-mini',
     feedbackText: state.feedbackText || '',
+    feedbackImages: sanitizeFeedbackImages(state.feedbackImages),
   };
 }
 
@@ -166,6 +172,9 @@ async function handleSetPopupState(message) {
   if (typeof message.feedbackText === 'string') {
     update.feedbackText = message.feedbackText.slice(0, 500);
   }
+  if (Array.isArray(message.feedbackImages)) {
+    update.feedbackImages = sanitizeFeedbackImages(message.feedbackImages);
+  }
 
   if (Object.keys(update).length > 0) {
     await chrome.storage.local.set(update);
@@ -180,11 +189,6 @@ async function handleGenerateDarkMode(message, sender) {
     return { css: null, error: 'No active tab available for generation' };
   }
   return generateAndApplyDarkMode(tabId, message);
-}
-
-async function handleRefineDarkMode(message, sender) {
-  // Placeholder: will be implemented in darkside2-b53.8
-  return { css: null, error: 'Not yet implemented' };
 }
 
 async function handleLlmComplete(message) {
@@ -388,8 +392,9 @@ async function handleRefineDarkMode(message, sender) {
   }
 
   const feedback = await resolveRefinementFeedback(message);
-  if (!feedback) {
-    return { css: null, error: 'Feedback text is required for refinement' };
+  const feedbackImages = await resolveRefinementImages(message);
+  if (!feedback && feedbackImages.length === 0) {
+    return { css: null, error: 'Feedback text or screenshot is required for refinement' };
   }
 
   let pageContext;
@@ -417,6 +422,7 @@ async function handleRefineDarkMode(message, sender) {
           pageContext,
           currentCss,
           feedback,
+          feedbackImages,
         }),
       },
     ],
@@ -446,106 +452,10 @@ async function handleRefineDarkMode(message, sender) {
     provider: llmResult.provider,
     model: llmResult.model,
     feedbackUsed: feedback,
+    feedbackImageCount: feedbackImages.length,
     truncatedContext: Boolean(pageContext?.truncated),
     nodeCount: pageContext?.nodeCount || 0,
   };
-}
-
-async function handleLlmComplete(message) {
-  try {
-    const result = await completeLlmRequest(message.request || {});
-    return { ok: true, result };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
-  }
-}
-
-async function handleLlmProviders() {
-  return { providers: listSupportedProviders() };
-}
-
-async function loadStyleStorage() {
-  const data = await chrome.storage.local.get(STYLE_STORAGE_KEY);
-  if (!isObject(data[STYLE_STORAGE_KEY])) return {};
-  return data[STYLE_STORAGE_KEY];
-}
-
-async function getStoredStyleForUrl(rawUrl) {
-  const parsed = parseURL(rawUrl);
-  if (!parsed) return { css: null, scope: null, found: false };
-
-  const styles = await loadStyleStorage();
-  const domainEntry = styles[parsed.domain];
-  if (!domainEntry) return { css: null, scope: null, found: false };
-
-  const pageCss = domainEntry.pages?.[parsed.page];
-  if (typeof pageCss === 'string') {
-    return { css: pageCss, scope: 'page', found: true };
-  }
-
-  if (typeof domainEntry.css === 'string') {
-    return { css: domainEntry.css, scope: 'domain', found: true };
-  }
-
-  return { css: null, scope: null, found: false };
-}
-
-async function syncTabRememberedStyle(tabId, url) {
-  if (typeof tabId !== 'number') return;
-
-  const { enabled } = await chrome.storage.local.get('enabled');
-  if (!enabled) {
-    await removeCssFromTab(tabId);
-    return;
-  }
-
-  const stored = await getStoredStyleForUrl(url);
-  if (stored.found && typeof stored.css === 'string') {
-    await sendMessageToTab(tabId, { type: 'apply-css', css: stored.css });
-    return;
-  }
-
-  await removeCssFromTab(tabId);
-}
-
-async function removeCssFromTab(tabId) {
-  if (typeof tabId !== 'number') return;
-  await sendMessageToTab(tabId, { type: 'remove-css' });
-}
-
-async function sendMessageToTab(tabId, message) {
-  try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch {
-    // Ignore tabs without our content script (e.g. chrome:// pages).
-  }
-}
-
-function parseURL(rawUrl) {
-  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
-
-  try {
-    const url = new URL(rawUrl);
-    if (!url.hostname) return null;
-
-    const domain = url.hostname.toLowerCase();
-    const path = url.pathname || '/';
-    const query = url.search || '';
-    const page = `${path}${query}`;
-    return { domain, page };
-  } catch {
-    return null;
-  }
-}
-
-function isObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function resolveTabId(message, sender) {
-  if (Number.isInteger(message?.tabId)) return message.tabId;
-  if (Number.isInteger(sender?.tab?.id)) return sender.tab.id;
-  return null;
 }
 
 async function resolveTabIdWithFallback(message, sender) {
@@ -600,11 +510,11 @@ function buildDarkModeUserPrompt(pageContext) {
   ].join('\n');
 }
 
-function buildRefineUserPrompt({ pageContext, currentCss, feedback }) {
+function buildRefineUserPrompt({ pageContext, currentCss, feedback, feedbackImages }) {
   const safeContext = sanitizePageContext(pageContext);
   const contextJson = JSON.stringify(safeContext);
-
-  return [
+  const safeFeedback = feedback || '(no text feedback provided; use screenshots to infer issues)';
+  const textPrompt = [
     'Refine the existing dark mode CSS based on user feedback.',
     'Requirements:',
     '- Keep improvements already present unless feedback requests changes.',
@@ -612,12 +522,24 @@ function buildRefineUserPrompt({ pageContext, currentCss, feedback }) {
     '- Maintain accessible contrast and visible interactive states.',
     '- Return a full replacement CSS stylesheet.',
     'User feedback:',
-    feedback,
+    safeFeedback,
     'Current CSS:',
     currentCss,
     'Page context JSON:',
     contextJson,
   ].join('\n');
+
+  if (!feedbackImages.length) {
+    return textPrompt;
+  }
+
+  return [
+    { type: 'text', text: `${textPrompt}\nAttached screenshots: ${feedbackImages.length}` },
+    ...feedbackImages.map((image) => ({
+      type: 'image_url',
+      image_url: { url: image.dataUrl },
+    })),
+  ];
 }
 
 async function resolveRefinementFeedback(message) {
@@ -629,6 +551,15 @@ async function resolveRefinementFeedback(message) {
   const { feedbackText } = await chrome.storage.local.get('feedbackText');
   if (typeof feedbackText !== 'string') return '';
   return feedbackText.trim().slice(0, 500);
+}
+
+async function resolveRefinementImages(message) {
+  if (Array.isArray(message?.feedbackImages)) {
+    return sanitizeFeedbackImages(message.feedbackImages);
+  }
+
+  const { feedbackImages } = await chrome.storage.local.get('feedbackImages');
+  return sanitizeFeedbackImages(feedbackImages);
 }
 
 async function resolveCurrentCssForRefinement(message, sender, tabId) {
@@ -661,6 +592,38 @@ async function resolveCurrentCssForRefinement(message, sender, tabId) {
   }
 
   return '';
+}
+
+function sanitizeFeedbackImages(images) {
+  if (!Array.isArray(images)) return [];
+  const sanitized = [];
+
+  for (const image of images) {
+    if (!isObject(image)) continue;
+    if (typeof image.dataUrl !== 'string') continue;
+    if (!image.dataUrl.startsWith('data:image/')) continue;
+    if (typeof image.mimeType !== 'string' || !image.mimeType.startsWith('image/')) continue;
+    if (!Number.isFinite(image.sizeBytes) || image.sizeBytes <= 0) continue;
+    if (image.sizeBytes > MAX_FEEDBACK_IMAGE_BYTES) continue;
+
+    sanitized.push({
+      id:
+        typeof image.id === 'string' && image.id
+          ? image.id
+          : `img-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
+      name:
+        typeof image.name === 'string' && image.name
+          ? image.name.slice(0, MAX_FEEDBACK_IMAGE_NAME_LENGTH)
+          : 'screenshot.webp',
+      mimeType: image.mimeType,
+      sizeBytes: image.sizeBytes,
+      dataUrl: image.dataUrl,
+    });
+
+    if (sanitized.length >= MAX_FEEDBACK_IMAGES) break;
+  }
+
+  return sanitized;
 }
 
 function sanitizePageContext(pageContext) {

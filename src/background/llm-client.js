@@ -29,14 +29,45 @@ function normalizeMessages(messages, systemPrompt) {
 
   for (const message of messages || []) {
     if (!message || typeof message !== 'object') continue;
-    if (!message.role || !message.content) continue;
+    const content = normalizeMessageContent(message.content);
+    if (!message.role || !content) continue;
     normalized.push({
       role: String(message.role),
-      content: String(message.content),
+      content,
     });
   }
 
   return normalized;
+}
+
+function normalizeMessageContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  const normalizedParts = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+
+    if (part.type === 'text' && typeof part.text === 'string' && part.text) {
+      normalizedParts.push({ type: 'text', text: part.text });
+      continue;
+    }
+
+    if (
+      part.type === 'image_url' &&
+      part.image_url &&
+      typeof part.image_url === 'object' &&
+      typeof part.image_url.url === 'string' &&
+      part.image_url.url.startsWith('data:image/')
+    ) {
+      normalizedParts.push({
+        type: 'image_url',
+        image_url: { url: part.image_url.url },
+      });
+    }
+  }
+
+  return normalizedParts.length ? normalizedParts : '';
 }
 
 function getErrorMessage(responseBody, fallback) {
@@ -227,6 +258,11 @@ async function requestOpenAiLikeCompletion({
   maxTokens,
   headers = {},
 }) {
+  const normalizedMessages = messages.map((message) => ({
+    role: message.role,
+    content: convertToOpenAiContent(message.content),
+  }));
+
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -236,7 +272,7 @@ async function requestOpenAiLikeCompletion({
     },
     body: JSON.stringify({
       model,
-      messages,
+      messages: normalizedMessages,
       ...(typeof temperature === 'number' ? { temperature } : {}),
       ...(typeof maxTokens === 'number' ? { max_tokens: maxTokens } : {}),
     }),
@@ -266,7 +302,7 @@ async function requestAnthropicCompletion({
     .filter((msg) => msg.role !== 'system')
     .map((msg) => ({
       role: msg.role === 'assistant' ? 'assistant' : 'user',
-      content: msg.content,
+      content: convertToAnthropicContent(msg.content),
     }));
 
   const response = await fetch(endpoint, {
@@ -328,7 +364,7 @@ async function requestGoogleCompletion({
         : {}),
       contents: promptMessages.map((msg) => ({
         role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
+        parts: convertToGoogleParts(msg.content),
       })),
       generationConfig: {
         ...(typeof temperature === 'number' ? { temperature } : {}),
@@ -350,6 +386,81 @@ async function requestGoogleCompletion({
   }
 
   return { text, raw: data };
+}
+
+function convertToOpenAiContent(content) {
+  if (typeof content === 'string') return content;
+  return content.map((part) => {
+    if (part.type === 'text') {
+      return { type: 'text', text: part.text };
+    }
+    return {
+      type: 'image_url',
+      image_url: { url: part.image_url.url },
+    };
+  });
+}
+
+function convertToAnthropicContent(content) {
+  if (typeof content === 'string') return content;
+  const parts = [];
+
+  for (const part of content) {
+    if (part.type === 'text') {
+      parts.push({ type: 'text', text: part.text });
+      continue;
+    }
+
+    if (part.type === 'image_url') {
+      const parsed = parseDataUrl(part.image_url.url);
+      if (!parsed) continue;
+      parts.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: parsed.mimeType,
+          data: parsed.base64Data,
+        },
+      });
+    }
+  }
+
+  return parts;
+}
+
+function convertToGoogleParts(content) {
+  if (typeof content === 'string') return [{ text: content }];
+  const parts = [];
+
+  for (const part of content) {
+    if (part.type === 'text') {
+      parts.push({ text: part.text });
+      continue;
+    }
+
+    if (part.type === 'image_url') {
+      const parsed = parseDataUrl(part.image_url.url);
+      if (!parsed) continue;
+      parts.push({
+        inlineData: {
+          mimeType: parsed.mimeType,
+          data: parsed.base64Data,
+        },
+      });
+    }
+  }
+
+  return parts;
+}
+
+function parseDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') return null;
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!match) return null;
+  return {
+    mimeType: match[1],
+    base64Data: match[2],
+  };
 }
 
 export async function completeLlmRequest(request = {}) {

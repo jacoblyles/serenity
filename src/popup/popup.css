@@ -150,6 +150,92 @@ h1 {
   color: #8585aa;
 }
 
+.attachments-row {
+  margin-top: 8px;
+}
+
+#feedback-image-btn {
+  width: 100%;
+  border: 1px solid #34345c;
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: #191938;
+  color: #f0f0ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#feedback-image-btn:hover {
+  background: #23234a;
+}
+
+#feedback-image-input {
+  display: none;
+}
+
+#feedback-image-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8585aa;
+}
+
+#feedback-image-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feedback-image-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #34345c;
+  border-radius: 8px;
+  background: #131327;
+  padding: 6px;
+}
+
+.feedback-image-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #0e0e1f;
+}
+
+.feedback-image-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.feedback-image-name,
+.feedback-image-size {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feedback-image-name {
+  color: #ddd;
+}
+
+.feedback-image-size {
+  color: #8585aa;
+  margin-top: 2px;
+}
+
+.feedback-image-remove {
+  border: 1px solid #34345c;
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: #191938;
+  color: #f0f0ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 #status {
   font-size: 13px;
   color: #888;
