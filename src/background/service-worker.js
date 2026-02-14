@@ -14,6 +14,22 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  if (typeof tab?.url !== 'string') return;
+  void syncTabRememberedStyle(tabId, tab.url);
+});
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (typeof tab?.url !== 'string') return;
+    await syncTabRememberedStyle(tabId, tab.url);
+  } catch {
+    // Ignore tabs that cannot be queried.
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handlers = {
     'get-status': handleGetStatus,
@@ -43,28 +59,20 @@ async function handleGetStatus() {
 
 async function handleSetStatus(message) {
   await chrome.storage.local.set({ enabled: message.enabled });
+  if (!message.enabled) {
+    try {
+      const tabs = await chrome.tabs.query({});
+      await Promise.all(tabs.map((tab) => removeCssFromTab(tab.id)));
+    } catch {
+      // Ignore tab query/send failures.
+    }
+  }
   return { enabled: message.enabled };
 }
 
 async function handleGetStoredStyle(message, sender) {
   const rawUrl = message.url || sender?.tab?.url;
-  const parsed = parseURL(rawUrl);
-  if (!parsed) return { css: null, scope: null, found: false };
-
-  const styles = await loadStyleStorage();
-  const domainEntry = styles[parsed.domain];
-  if (!domainEntry) return { css: null, scope: null, found: false };
-
-  const pageCss = domainEntry.pages?.[parsed.page];
-  if (typeof pageCss === 'string') {
-    return { css: pageCss, scope: 'page', found: true };
-  }
-
-  if (typeof domainEntry.css === 'string') {
-    return { css: domainEntry.css, scope: 'domain', found: true };
-  }
-
-  return { css: null, scope: null, found: false };
+  return getStoredStyleForUrl(rawUrl);
 }
 
 async function handleSaveStoredStyle(message, sender) {
@@ -192,6 +200,57 @@ async function loadStyleStorage() {
   const data = await chrome.storage.local.get(STYLE_STORAGE_KEY);
   if (!isObject(data[STYLE_STORAGE_KEY])) return {};
   return data[STYLE_STORAGE_KEY];
+}
+
+async function getStoredStyleForUrl(rawUrl) {
+  const parsed = parseURL(rawUrl);
+  if (!parsed) return { css: null, scope: null, found: false };
+
+  const styles = await loadStyleStorage();
+  const domainEntry = styles[parsed.domain];
+  if (!domainEntry) return { css: null, scope: null, found: false };
+
+  const pageCss = domainEntry.pages?.[parsed.page];
+  if (typeof pageCss === 'string') {
+    return { css: pageCss, scope: 'page', found: true };
+  }
+
+  if (typeof domainEntry.css === 'string') {
+    return { css: domainEntry.css, scope: 'domain', found: true };
+  }
+
+  return { css: null, scope: null, found: false };
+}
+
+async function syncTabRememberedStyle(tabId, url) {
+  if (typeof tabId !== 'number') return;
+
+  const { enabled } = await chrome.storage.local.get('enabled');
+  if (!enabled) {
+    await removeCssFromTab(tabId);
+    return;
+  }
+
+  const stored = await getStoredStyleForUrl(url);
+  if (stored.found && typeof stored.css === 'string') {
+    await sendMessageToTab(tabId, { type: 'apply-css', css: stored.css });
+    return;
+  }
+
+  await removeCssFromTab(tabId);
+}
+
+async function removeCssFromTab(tabId) {
+  if (typeof tabId !== 'number') return;
+  await sendMessageToTab(tabId, { type: 'remove-css' });
+}
+
+async function sendMessageToTab(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    // Ignore tabs without our content script (e.g. chrome:// pages).
+  }
 }
 
 function parseURL(rawUrl) {
