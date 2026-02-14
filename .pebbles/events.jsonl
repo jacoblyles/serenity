@@ -102,3 +102,7 @@
 {"type":"close","timestamp":"2026-02-14T04:57:29.425309Z","issue_id":"darkside2-b53.9","payload":{}}
 {"type":"close","timestamp":"2026-02-14T04:57:29.476107Z","issue_id":"darkside2-b53.10","payload":{}}
 {"type":"close","timestamp":"2026-02-14T04:57:29.530324Z","issue_id":"darkside2-b53.12","payload":{}}
+{"type":"status_update","timestamp":"2026-02-14T04:57:50.090061Z","issue_id":"darkside2-b53.13","payload":{"status":"in_progress"}}
+{"type":"close","timestamp":"2026-02-14T05:01:57.274041Z","issue_id":"darkside2-b53.13","payload":{}}
+{"type":"close","timestamp":"2026-02-14T05:02:11.800904Z","issue_id":"darkside2-b53.13","payload":{}}
+{"type":"close","timestamp":"2026-02-14T05:02:11.866628Z","issue_id":"darkside2-b53","payload":{}}
