@@ -116,3 +116,16 @@
 {"type":"create","timestamp":"2026-02-14T13:11:40.491233Z","issue_id":"darkside2-d13","payload":{"description":"","priority":"1","title":"Rename extension from Darkside to Serenity","type":"task"}}
 {"type":"create","timestamp":"2026-02-14T13:11:40.555114Z","issue_id":"darkside2-959","payload":{"description":"","priority":"3","title":"Add eslint config and web-ext dev setup","type":"task"}}
 {"type":"create","timestamp":"2026-02-14T13:11:40.670524Z","issue_id":"darkside2-f7a","payload":{"description":"","priority":"3","title":"Add loading and error states to popup UI","type":"task"}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.093999Z","issue_id":"darkside2-1e4","payload":{}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.177683Z","issue_id":"darkside2-d13","payload":{}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.251816Z","issue_id":"darkside2-f8f","payload":{}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.373299Z","issue_id":"darkside2-58e","payload":{}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.467047Z","issue_id":"darkside2-e99","payload":{}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.576342Z","issue_id":"darkside2-eea","payload":{}}
+{"type":"close","timestamp":"2026-02-14T13:17:07.740533Z","issue_id":"darkside2-f63","payload":{}}
+{"type":"comment","timestamp":"2026-02-14T13:17:13.499633Z","issue_id":"darkside2-42a","payload":{"body":"Skipped: Splitting service-worker.js into modules is useful but high refactor risk right now; current review priorities were reliability/security fixes and targeted P2 improvements."}}
+{"type":"close","timestamp":"2026-02-14T13:17:13.560575Z","issue_id":"darkside2-42a","payload":{}}
+{"type":"comment","timestamp":"2026-02-14T13:17:13.643371Z","issue_id":"darkside2-959","payload":{"body":"Skipped: Adding eslint/web-ext setup is tooling-focused and lower immediate product value than the shipped bug/security fixes in this pass."}}
+{"type":"close","timestamp":"2026-02-14T13:17:13.71664Z","issue_id":"darkside2-959","payload":{}}
+{"type":"comment","timestamp":"2026-02-14T13:17:13.783392Z","issue_id":"darkside2-f7a","payload":{"body":"Skipped: Popup already surfaces save/load/generate status/errors, and deeper loading-state UI polish is optional P3 and lower value than completed P1/P2 work."}}
+{"type":"close","timestamp":"2026-02-14T13:17:13.840812Z","issue_id":"darkside2-f7a","payload":{}}
