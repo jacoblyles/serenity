@@ -1,9 +1,10 @@
-import { PROVIDER_CONFIG, PROVIDER_MODELS } from '../shared/llm-settings.js';
+import { PROVIDER_CONFIG, PROVIDER_MODELS, MANAGED_PROVIDERS } from '../shared/llm-settings.js';
 
 const toggle = document.getElementById('toggle-dark-mode');
 const autoToggle = document.getElementById('toggle-auto-mode');
 const label = document.getElementById('toggle-label');
 const autoLabel = document.getElementById('auto-toggle-label');
+const providerSelector = document.getElementById('provider-selector');
 const modelSelector = document.getElementById('model-selector');
 const generateDarkModeBtn = document.getElementById('generate-dark-mode-btn');
 const openSettingsBtn = document.getElementById('open-settings-btn');
@@ -21,42 +22,88 @@ const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
 const MAX_FEEDBACK_IMAGE_DIMENSION = 1600;
 const IMAGE_NAME_MAX_LENGTH = 80;
 
-function buildModelOptions() {
-  modelSelector.innerHTML = '';
-  for (const [provider, models] of Object.entries(PROVIDER_MODELS)) {
-    const group = document.createElement('optgroup');
-    group.label = PROVIDER_CONFIG[provider]?.label || provider;
-    for (const model of models) {
-      const option = document.createElement('option');
-      option.value = model.id;
-      option.textContent = model.label;
-      group.appendChild(option);
-    }
-    modelSelector.appendChild(group);
+function buildProviderOptions() {
+  for (const key of MANAGED_PROVIDERS) {
+    const config = PROVIDER_CONFIG[key];
+    if (!config) continue;
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = config.label;
+    providerSelector.appendChild(option);
   }
 }
 
-function setSelectedModel(model) {
-  if (!model) model = PROVIDER_CONFIG.openai.defaultModel;
-  modelSelector.value = model;
-  // If the model isn't in the list, add it as a custom option
-  if (modelSelector.value !== model) {
+function buildModelOptions(providerKey) {
+  modelSelector.innerHTML = '';
+
+  const models = PROVIDER_MODELS[providerKey];
+  if (!models || models.length === 0) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    placeholder.textContent = 'No models available';
+    modelSelector.appendChild(placeholder);
+    modelSelector.disabled = true;
+    return;
+  }
+
+  modelSelector.disabled = false;
+  for (const model of models) {
     const option = document.createElement('option');
-    option.value = model;
-    option.textContent = model;
+    option.value = model.id;
+    option.textContent = model.label;
     modelSelector.appendChild(option);
-    modelSelector.value = model;
+  }
+}
+
+function findProviderForModel(modelId) {
+  for (const [provider, models] of Object.entries(PROVIDER_MODELS)) {
+    if (models.some((m) => m.id === modelId)) return provider;
+  }
+  return null;
+}
+
+function setSelectedProvider(providerKey) {
+  if (providerKey && PROVIDER_CONFIG[providerKey]) {
+    providerSelector.value = providerKey;
+    buildModelOptions(providerKey);
+  }
+}
+
+function setSelectedModel(modelId) {
+  if (!modelId) return;
+
+  const provider = findProviderForModel(modelId);
+  if (provider) {
+    setSelectedProvider(provider);
+    modelSelector.value = modelId;
+    if (modelSelector.value !== modelId) {
+      // Model not in list — append it
+      const option = document.createElement('option');
+      option.value = modelId;
+      option.textContent = modelId;
+      modelSelector.appendChild(option);
+      modelSelector.value = modelId;
+    }
   }
 }
 
 function setGenerateInFlight(inFlight) {
   isGenerating = inFlight;
   generateDarkModeBtn.disabled = inFlight;
-  generateDarkModeBtn.textContent = inFlight ? 'Generating...' : 'Generate dark mode';
+  const icon = generateDarkModeBtn.querySelector('.btn-icon');
+  if (inFlight) {
+    if (icon) icon.style.display = 'none';
+    generateDarkModeBtn.lastChild.textContent = 'Generating\u2026';
+  } else {
+    if (icon) icon.style.display = '';
+    generateDarkModeBtn.lastChild.textContent = 'Generate dark mode';
+  }
 }
 
 async function init() {
-  buildModelOptions();
+  buildProviderOptions();
 
   try {
     const response = await chrome.runtime.sendMessage({ type: 'get-popup-state' });
@@ -102,6 +149,19 @@ autoToggle.addEventListener('change', async () => {
   await saveState({ autoMode });
 });
 
+providerSelector.addEventListener('change', () => {
+  const providerKey = providerSelector.value;
+  buildModelOptions(providerKey);
+
+  // Auto-select the provider's default model
+  const config = PROVIDER_CONFIG[providerKey];
+  if (config?.defaultModel) {
+    modelSelector.value = config.defaultModel;
+  }
+  // Save the newly selected model
+  saveState({ selectedModel: modelSelector.value });
+});
+
 modelSelector.addEventListener('change', async () => {
   await saveState({ selectedModel: modelSelector.value });
 });
@@ -142,7 +202,7 @@ generateDarkModeBtn.addEventListener('click', async () => {
   if (isGenerating) return;
 
   setGenerateInFlight(true);
-  status.textContent = 'Generating dark mode...';
+  status.textContent = 'Generating dark mode\u2026';
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
