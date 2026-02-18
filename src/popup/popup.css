@@ -15,10 +15,34 @@ body {
   padding: 16px;
 }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
 h1 {
   font-size: 18px;
-  margin-bottom: 14px;
   color: #fff;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: #8585aa;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+
+.icon-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .section {
@@ -103,33 +127,6 @@ h1 {
 
 #model-selector {
   cursor: pointer;
-}
-
-.quick-model-actions {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-}
-
-.quick-model-actions button {
-  flex: 1;
-  border: 1px solid #34345c;
-  border-radius: 8px;
-  padding: 7px 8px;
-  background: #191938;
-  color: #f0f0ff;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.quick-model-actions button:hover {
-  background: #23234a;
-}
-
-#model-hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: #8585aa;
 }
 
 #generate-dark-mode-btn {

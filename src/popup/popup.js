@@ -1,12 +1,12 @@
+import { PROVIDER_CONFIG, PROVIDER_MODELS } from '../shared/llm-settings.js';
+
 const toggle = document.getElementById('toggle-dark-mode');
 const autoToggle = document.getElementById('toggle-auto-mode');
 const label = document.getElementById('toggle-label');
 const autoLabel = document.getElementById('auto-toggle-label');
 const modelSelector = document.getElementById('model-selector');
-const modelStrongerBtn = document.getElementById('model-stronger-btn');
-const modelResetBtn = document.getElementById('model-reset-btn');
 const generateDarkModeBtn = document.getElementById('generate-dark-mode-btn');
-const modelHint = document.getElementById('model-hint');
+const openSettingsBtn = document.getElementById('open-settings-btn');
 const feedbackText = document.getElementById('feedback-text');
 const feedbackImageBtn = document.getElementById('feedback-image-btn');
 const feedbackImageInput = document.getElementById('feedback-image-input');
@@ -16,38 +16,37 @@ let feedbackSaveTimer = null;
 let feedbackImages = [];
 let isGenerating = false;
 
-const DEFAULT_MODEL = 'gpt-4.1-mini';
 const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
 const MAX_FEEDBACK_IMAGE_DIMENSION = 1600;
 const IMAGE_NAME_MAX_LENGTH = 80;
-const MODEL_STRENGTH_ORDER = [
-  'gpt-4.1-mini',
-  'gemini-2.0-flash',
-  'gpt-4.1',
-  'claude-3-5-sonnet-latest',
-];
-const MODEL_ALIASES = {
-  'claude-3-5-sonnet': 'claude-3-5-sonnet-latest',
-};
 
-function normalizeModel(model) {
-  if (!model) return DEFAULT_MODEL;
-  return MODEL_ALIASES[model] || model;
-}
-
-function getSelectedModelLabel() {
-  return modelSelector.options[modelSelector.selectedIndex]?.text || modelSelector.value;
-}
-
-function updateModelHint() {
-  modelHint.textContent = `Current: ${getSelectedModelLabel()}`;
+function buildModelOptions() {
+  modelSelector.innerHTML = '';
+  for (const [provider, models] of Object.entries(PROVIDER_MODELS)) {
+    const group = document.createElement('optgroup');
+    group.label = PROVIDER_CONFIG[provider]?.label || provider;
+    for (const model of models) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.label;
+      group.appendChild(option);
+    }
+    modelSelector.appendChild(group);
+  }
 }
 
 function setSelectedModel(model) {
-  const normalizedModel = normalizeModel(model);
-  modelSelector.value = normalizedModel;
-  updateModelHint();
+  if (!model) model = PROVIDER_CONFIG.openai.defaultModel;
+  modelSelector.value = model;
+  // If the model isn't in the list, add it as a custom option
+  if (modelSelector.value !== model) {
+    const option = document.createElement('option');
+    option.value = model;
+    option.textContent = model;
+    modelSelector.appendChild(option);
+    modelSelector.value = model;
+  }
 }
 
 function setGenerateInFlight(inFlight) {
@@ -57,6 +56,8 @@ function setGenerateInFlight(inFlight) {
 }
 
 async function init() {
+  buildModelOptions();
+
   try {
     const response = await chrome.runtime.sendMessage({ type: 'get-popup-state' });
     toggle.checked = Boolean(response.enabled);
@@ -85,6 +86,10 @@ async function saveState(partialState) {
   }
 }
 
+openSettingsBtn.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
+
 toggle.addEventListener('change', async () => {
   const enabled = toggle.checked;
   label.textContent = enabled ? 'On' : 'Off';
@@ -98,8 +103,7 @@ autoToggle.addEventListener('change', async () => {
 });
 
 modelSelector.addEventListener('change', async () => {
-  setSelectedModel(modelSelector.value);
-  await saveState({ selectedModel: normalizeModel(modelSelector.value) });
+  await saveState({ selectedModel: modelSelector.value });
 });
 
 feedbackText.addEventListener('input', async () => {
@@ -134,34 +138,6 @@ feedbackImageInput.addEventListener('change', async () => {
   await addFeedbackImageFiles(files);
 });
 
-modelStrongerBtn.addEventListener('click', async () => {
-  const currentModel = normalizeModel(modelSelector.value);
-  const currentIndex = MODEL_STRENGTH_ORDER.indexOf(currentModel);
-  const nextModel =
-    currentIndex === -1
-      ? MODEL_STRENGTH_ORDER[MODEL_STRENGTH_ORDER.length - 1]
-      : MODEL_STRENGTH_ORDER[Math.min(currentIndex + 1, MODEL_STRENGTH_ORDER.length - 1)];
-
-  if (nextModel === currentModel) {
-    status.textContent = 'Already using strongest quick-switch model';
-    return;
-  }
-
-  setSelectedModel(nextModel);
-  await saveState({ selectedModel: nextModel });
-});
-
-modelResetBtn.addEventListener('click', async () => {
-  const currentModel = normalizeModel(modelSelector.value);
-  if (currentModel === DEFAULT_MODEL) {
-    status.textContent = 'Already using default model';
-    return;
-  }
-
-  setSelectedModel(DEFAULT_MODEL);
-  await saveState({ selectedModel: DEFAULT_MODEL });
-});
-
 generateDarkModeBtn.addEventListener('click', async () => {
   if (isGenerating) return;
 
@@ -178,7 +154,7 @@ generateDarkModeBtn.addEventListener('click', async () => {
     const result = await chrome.runtime.sendMessage({
       type: 'generate-dark-mode',
       tabId: activeTab.id,
-      model: normalizeModel(modelSelector.value),
+      model: modelSelector.value,
     });
 
     if (result?.error) {

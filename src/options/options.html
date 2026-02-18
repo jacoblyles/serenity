@@ -10,7 +10,7 @@
   <main class="container">
     <header class="page-header">
       <h1>Serenity Settings</h1>
-      <p class="page-subtitle">Configure providers, credentials, models, and defaults.</p>
+      <p class="page-subtitle">Configure your AI providers and preferences.</p>
     </header>
 
     <form id="settings-form">
@@ -21,16 +21,15 @@
             <span class="field-label">Default provider</span>
             <select id="default-provider" required></select>
           </label>
-          <label class="field checkbox-field">
-            <input type="checkbox" id="sync-popup-model" checked>
-            <span>Sync popup model to default provider model on save</span>
-          </label>
         </div>
       </section>
 
       <section class="card">
-        <h2>Provider Settings</h2>
-        <div id="provider-settings" class="provider-settings"></div>
+        <div class="section-header">
+          <h2>Providers</h2>
+          <button type="button" id="add-provider-btn" class="button icon-button" title="Add provider">+</button>
+        </div>
+        <div id="provider-list"></div>
       </section>
 
       <section class="card">

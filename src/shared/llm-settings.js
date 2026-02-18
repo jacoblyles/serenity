@@ -1,36 +1,48 @@
+export const PROVIDER_MODELS = {
+  openai: [
+    { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', tier: 'fast' },
+    { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', tier: 'balanced' },
+    { id: 'gpt-4.1', label: 'GPT-4.1', tier: 'strong' },
+  ],
+  anthropic: [
+    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', tier: 'balanced' },
+    { id: 'claude-opus-4-20250918', label: 'Claude Opus 4', tier: 'strong' },
+  ],
+  google: [
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', tier: 'fast' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', tier: 'strong' },
+  ],
+};
+
 export const PROVIDER_CONFIG = {
   openai: {
     label: 'OpenAI',
     defaultModel: 'gpt-4.1-mini',
     apiKeyStorageKey: 'openai',
     endpoint: 'https://api.openai.com/v1/chat/completions',
-    supportsOAuth: true,
   },
   anthropic: {
     label: 'Anthropic',
-    defaultModel: 'claude-3-5-sonnet-latest',
+    defaultModel: 'claude-sonnet-4-20250514',
     apiKeyStorageKey: 'anthropic',
     endpoint: 'https://api.anthropic.com/v1/messages',
-    supportsOAuth: true,
   },
   google: {
     label: 'Google',
-    defaultModel: 'gemini-2.0-flash',
+    defaultModel: 'gemini-2.5-flash',
     apiKeyStorageKey: 'google',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
-    supportsOAuth: true,
   },
   custom: {
     label: 'Custom',
     defaultModel: '',
     apiKeyStorageKey: 'custom',
     endpoint: '',
-    supportsOAuth: false,
   },
 };
 
-export const OAUTH_PROVIDERS = Object.keys(PROVIDER_CONFIG).filter(
-  (provider) => PROVIDER_CONFIG[provider].supportsOAuth
+export const MANAGED_PROVIDERS = Object.keys(PROVIDER_CONFIG).filter(
+  (provider) => provider !== 'custom'
 );
 
 export function getDefaultLlmSettings() {
@@ -42,34 +54,6 @@ export function getDefaultLlmSettings() {
     apiKeys: Object.fromEntries(
       Object.entries(PROVIDER_CONFIG).map(([, config]) => [config.apiKeyStorageKey, ''])
     ),
-    authModes: {
-      openai: 'apiKey',
-      anthropic: 'apiKey',
-      google: 'apiKey',
-    },
-    oauth: {
-      openai: {
-        connected: false,
-        accessToken: '',
-        accountEmail: '',
-        scopes: [],
-        updatedAt: '',
-      },
-      anthropic: {
-        connected: false,
-        accessToken: '',
-        accountEmail: '',
-        scopes: [],
-        updatedAt: '',
-      },
-      google: {
-        connected: false,
-        accessToken: '',
-        accountEmail: '',
-        scopes: [],
-        updatedAt: '',
-      },
-    },
     customEndpoint: {
       url: '',
       model: '',
@@ -93,26 +77,6 @@ export function mergeLlmSettings(rawSettings) {
     apiKeys: {
       ...defaults.apiKeys,
       ...(settings.apiKeys || {}),
-    },
-    authModes: {
-      ...defaults.authModes,
-      ...(settings.authModes || {}),
-    },
-    oauth: {
-      ...defaults.oauth,
-      ...(settings.oauth || {}),
-      openai: {
-        ...defaults.oauth.openai,
-        ...((settings.oauth && settings.oauth.openai) || {}),
-      },
-      anthropic: {
-        ...defaults.oauth.anthropic,
-        ...((settings.oauth && settings.oauth.anthropic) || {}),
-      },
-      google: {
-        ...defaults.oauth.google,
-        ...((settings.oauth && settings.oauth.google) || {}),
-      },
     },
     customEndpoint: {
       ...defaults.customEndpoint,

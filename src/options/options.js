@@ -1,18 +1,17 @@
 import {
-  OAUTH_PROVIDERS,
   PROVIDER_CONFIG,
+  PROVIDER_MODELS,
+  MANAGED_PROVIDERS,
   getDefaultLlmSettings,
   isHttpsUrl,
   mergeLlmSettings,
 } from '../shared/llm-settings.js';
 
-const PROVIDERS = PROVIDER_CONFIG;
-
 const ui = {
   form: document.getElementById('settings-form'),
   defaultProvider: document.getElementById('default-provider'),
-  providerSettings: document.getElementById('provider-settings'),
-  syncPopupModel: document.getElementById('sync-popup-model'),
+  providerList: document.getElementById('provider-list'),
+  addProviderBtn: document.getElementById('add-provider-btn'),
   customEndpointUrl: document.getElementById('custom-endpoint-url'),
   customModel: document.getElementById('custom-model'),
   customApiKey: document.getElementById('custom-api-key'),
@@ -22,6 +21,8 @@ const ui = {
 };
 
 let state = getDefaultLlmSettings();
+// Track which providers have visible rows
+let visibleProviders = [];
 
 function setStatus(message, type = '') {
   ui.status.textContent = message;
@@ -29,144 +30,144 @@ function setStatus(message, type = '') {
 }
 
 function buildDefaultProviderOptions() {
-  ui.defaultProvider.innerHTML = Object.entries(PROVIDERS)
+  ui.defaultProvider.innerHTML = Object.entries(PROVIDER_CONFIG)
     .map(([provider, info]) => `<option value="${provider}">${info.label}</option>`)
     .join('');
 }
 
-function toInputId(provider, field) {
-  return `${provider}-${field}`;
+function getAvailableProviders() {
+  return MANAGED_PROVIDERS.filter((p) => !visibleProviders.includes(p));
 }
 
-function renderProviderCards() {
-  const cards = Object.entries(PROVIDERS).map(([provider, info]) => {
-    if (provider === 'custom') {
-      return `
-        <article class="provider-card" data-provider="${provider}">
-          <div class="provider-head">
-            <span class="provider-name">${info.label}</span>
-            <span class="provider-kind">OpenAI-compatible</span>
-          </div>
-          <div class="field">
-            <label class="field-label" for="${toInputId(provider, 'model')}">Model</label>
-            <input id="${toInputId(provider, 'model')}" type="text" placeholder="custom-model-id">
-          </div>
-          <p class="oauth-status">Uses URL/API key/headers from the custom endpoint section.</p>
-        </article>
-      `;
-    }
+function detectProvider(apiKey) {
+  if (!apiKey) return null;
+  if (apiKey.startsWith('sk-ant-')) return 'anthropic';
+  if (apiKey.startsWith('sk-')) return 'openai';
+  if (apiKey.startsWith('AI')) return 'google';
+  return null;
+}
 
-    return `
-      <article class="provider-card" data-provider="${provider}">
-        <div class="provider-head">
-          <span class="provider-name">${info.label}</span>
-          <span class="provider-kind">Managed</span>
-        </div>
+function createProviderRow(provider, apiKey = '') {
+  const config = PROVIDER_CONFIG[provider];
+  if (!config) return null;
 
-        <div class="field">
-          <label class="field-label" for="${toInputId(provider, 'model')}">Model</label>
-          <input id="${toInputId(provider, 'model')}" type="text" placeholder="${info.defaultModel}">
-        </div>
+  const row = document.createElement('div');
+  row.className = 'provider-row';
+  row.dataset.provider = provider;
 
-        <div class="field">
-          <label class="field-label" for="${toInputId(provider, 'auth')}">Auth mode</label>
-          <select id="${toInputId(provider, 'auth')}">
-            <option value="apiKey">API key</option>
-            <option value="oauth">OAuth</option>
-          </select>
-        </div>
+  const models = PROVIDER_MODELS[provider] || [];
+  const modelOptions = models
+    .map((m) => `<option value="${m.id}">${m.label}</option>`)
+    .join('');
 
-        <div class="field">
-          <label class="field-label" for="${toInputId(provider, 'api-key')}">API key</label>
-          <input id="${toInputId(provider, 'api-key')}" type="password" autocomplete="off" placeholder="sk-...">
-        </div>
+  row.innerHTML = `
+    <div class="provider-row-header">
+      <span class="provider-name">${config.label}</span>
+      <button type="button" class="remove-provider-btn" title="Remove">&times;</button>
+    </div>
+    <div class="provider-fields">
+      <label class="field">
+        <span class="field-label">API key</span>
+        <input type="password" class="provider-api-key" autocomplete="off" placeholder="Paste your API key" value="${escapeAttr(apiKey)}">
+      </label>
+      <label class="field">
+        <span class="field-label">Model</span>
+        <select class="provider-model">${modelOptions}</select>
+      </label>
+    </div>
+  `;
 
-        <div class="field">
-          <label class="field-label" for="${toInputId(provider, 'oauth-email')}">OAuth account email</label>
-          <input id="${toInputId(provider, 'oauth-email')}" type="email" placeholder="name@example.com">
-        </div>
-
-        <div class="field">
-          <label class="field-label" for="${toInputId(provider, 'oauth-token')}">OAuth access token</label>
-          <input id="${toInputId(provider, 'oauth-token')}" type="password" autocomplete="off" placeholder="oauth-token">
-        </div>
-
-        <div class="field">
-          <label class="field-label" for="${toInputId(provider, 'oauth-scopes')}">OAuth scopes (comma separated)</label>
-          <input id="${toInputId(provider, 'oauth-scopes')}" type="text" placeholder="scope.read, scope.write">
-        </div>
-
-        <div class="oauth-actions">
-          <button type="button" class="button" data-action="oauth-connect" data-provider="${provider}">Connect</button>
-          <button type="button" class="button warn" data-action="oauth-disconnect" data-provider="${provider}">Disconnect</button>
-        </div>
-        <p id="${toInputId(provider, 'oauth-status')}" class="oauth-status">Not connected</p>
-      </article>
-    `;
+  const removeBtn = row.querySelector('.remove-provider-btn');
+  removeBtn.addEventListener('click', () => {
+    visibleProviders = visibleProviders.filter((p) => p !== provider);
+    row.remove();
+    updateAddButton();
   });
 
-  ui.providerSettings.innerHTML = cards.join('');
+  return row;
+}
+
+function updateAddButton() {
+  const available = getAvailableProviders();
+  ui.addProviderBtn.style.display = available.length > 0 ? '' : 'none';
+}
+
+function addProviderPrompt() {
+  const available = getAvailableProviders();
+  if (available.length === 0) return;
+
+  if (available.length === 1) {
+    addProvider(available[0]);
+    return;
+  }
+
+  // Show a simple picker
+  const picker = document.createElement('div');
+  picker.className = 'provider-picker';
+  for (const provider of available) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'button';
+    btn.textContent = PROVIDER_CONFIG[provider].label;
+    btn.addEventListener('click', () => {
+      picker.remove();
+      addProvider(provider);
+    });
+    picker.appendChild(btn);
+  }
+  ui.providerList.appendChild(picker);
+}
+
+function addProvider(provider, apiKey = '') {
+  // Remove any picker
+  const picker = ui.providerList.querySelector('.provider-picker');
+  if (picker) picker.remove();
+
+  if (visibleProviders.includes(provider)) return;
+  visibleProviders.push(provider);
+
+  const row = createProviderRow(provider, apiKey);
+  if (!row) return;
+
+  // Set model to saved value or default
+  const modelSelect = row.querySelector('.provider-model');
+  const savedModel = state.models[provider] || PROVIDER_CONFIG[provider].defaultModel;
+  if (modelSelect) modelSelect.value = savedModel;
+
+  ui.providerList.appendChild(row);
+  updateAddButton();
+}
+
+function escapeAttr(str) {
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
 function hydrateForm() {
   ui.defaultProvider.value = state.provider;
 
-  for (const provider of Object.keys(PROVIDERS)) {
-    const modelInput = document.getElementById(toInputId(provider, 'model'));
-    if (modelInput) {
-      modelInput.value = state.models[provider] || '';
+  // Clear and rebuild provider rows
+  ui.providerList.innerHTML = '';
+  visibleProviders = [];
+
+  // Show rows for providers that have an API key set
+  for (const provider of MANAGED_PROVIDERS) {
+    const key = state.apiKeys[provider] || '';
+    if (key) {
+      addProvider(provider, key);
     }
+  }
 
-    if (provider === 'custom') continue;
-
-    const apiKeyInput = document.getElementById(toInputId(provider, 'api-key'));
-    const authInput = document.getElementById(toInputId(provider, 'auth'));
-    const oauthEmailInput = document.getElementById(toInputId(provider, 'oauth-email'));
-    const oauthTokenInput = document.getElementById(toInputId(provider, 'oauth-token'));
-    const oauthScopesInput = document.getElementById(toInputId(provider, 'oauth-scopes'));
-
-    apiKeyInput.value = state.apiKeys[provider] || '';
-    authInput.value = state.authModes[provider] || 'apiKey';
-
-    const oauth = state.oauth[provider] || {};
-    oauthEmailInput.value = oauth.accountEmail || '';
-    oauthTokenInput.value = oauth.accessToken || '';
-    oauthScopesInput.value = (oauth.scopes || []).join(', ');
-
-    updateOAuthStatus(provider);
+  // If no providers have keys, show the default provider row
+  if (visibleProviders.length === 0) {
+    addProvider(state.provider);
   }
 
   ui.customEndpointUrl.value = state.customEndpoint.url || '';
   ui.customModel.value = state.customEndpoint.model || '';
   ui.customApiKey.value = state.customEndpoint.apiKey || '';
   ui.customHeaders.value = JSON.stringify(state.customEndpoint.headers || {}, null, 2);
-}
 
-function updateOAuthStatus(provider) {
-  const oauth = state.oauth[provider] || {};
-  const statusNode = document.getElementById(toInputId(provider, 'oauth-status'));
-  if (!statusNode) return;
-
-  if (!oauth.connected) {
-    statusNode.textContent = 'Not connected';
-    return;
-  }
-
-  const updated = oauth.updatedAt ? new Date(oauth.updatedAt).toLocaleString() : 'unknown time';
-  const email = oauth.accountEmail || 'unknown account';
-  statusNode.textContent = `Connected as ${email} (${updated})`;
-}
-
-function readTextInput(id) {
-  const node = document.getElementById(id);
-  return node ? node.value.trim() : '';
-}
-
-function parseScopes(value) {
-  return value
-    .split(',')
-    .map((scope) => scope.trim())
-    .filter(Boolean);
+  updateAddButton();
 }
 
 function parseHeadersJson(value) {
@@ -195,29 +196,20 @@ function collectFromForm() {
   const next = getDefaultLlmSettings();
   const provider = ui.defaultProvider.value;
 
-  if (!PROVIDERS[provider]) {
+  if (!PROVIDER_CONFIG[provider]) {
     throw new Error('Default provider is invalid');
   }
-
   next.provider = provider;
 
-  for (const key of Object.keys(PROVIDERS)) {
-    next.models[key] = readTextInput(toInputId(key, 'model')) || PROVIDERS[key].defaultModel;
-
-    if (key === 'custom') continue;
-
-    const authMode = readTextInput(toInputId(key, 'auth'));
-    next.authModes[key] = authMode === 'oauth' ? 'oauth' : 'apiKey';
-
-    next.apiKeys[key] = readTextInput(toInputId(key, 'api-key'));
-
-    next.oauth[key] = {
-      connected: Boolean(state.oauth[key] && state.oauth[key].connected),
-      accountEmail: readTextInput(toInputId(key, 'oauth-email')),
-      accessToken: readTextInput(toInputId(key, 'oauth-token')),
-      scopes: parseScopes(readTextInput(toInputId(key, 'oauth-scopes'))),
-      updatedAt: state.oauth[key] && state.oauth[key].updatedAt ? state.oauth[key].updatedAt : '',
-    };
+  // Read from visible provider rows
+  const rows = ui.providerList.querySelectorAll('.provider-row');
+  for (const row of rows) {
+    const p = row.dataset.provider;
+    if (!p) continue;
+    const apiKeyInput = row.querySelector('.provider-api-key');
+    const modelSelect = row.querySelector('.provider-model');
+    next.apiKeys[p] = apiKeyInput ? apiKeyInput.value.trim() : '';
+    next.models[p] = modelSelect ? modelSelect.value : PROVIDER_CONFIG[p]?.defaultModel || '';
   }
 
   next.customEndpoint = {
@@ -248,66 +240,16 @@ async function saveSettings(event) {
     return;
   }
 
-  const storageUpdate = {
-    llmSettings: next,
-  };
-
-  if (ui.syncPopupModel.checked) {
-    const defaultModel = next.models[next.provider] || '';
-    if (defaultModel) {
-      storageUpdate.selectedModel = defaultModel;
-    }
+  const defaultModel = next.models[next.provider] || '';
+  const storageUpdate = { llmSettings: next };
+  if (defaultModel) {
+    storageUpdate.selectedModel = defaultModel;
   }
 
   await chrome.storage.local.set(storageUpdate);
   state = mergeLlmSettings(next);
 
-  for (const provider of OAUTH_PROVIDERS) {
-    updateOAuthStatus(provider);
-  }
-
   setStatus('Settings saved', 'success');
-}
-
-function connectOAuth(provider) {
-  const token = readTextInput(toInputId(provider, 'oauth-token'));
-  const email = readTextInput(toInputId(provider, 'oauth-email'));
-
-  if (!token) {
-    setStatus(`Cannot connect ${PROVIDERS[provider].label}: missing access token`, 'error');
-    return;
-  }
-
-  state.oauth[provider] = {
-    connected: true,
-    accessToken: token,
-    accountEmail: email,
-    scopes: parseScopes(readTextInput(toInputId(provider, 'oauth-scopes'))),
-    updatedAt: new Date().toISOString(),
-  };
-
-  updateOAuthStatus(provider);
-  setStatus(`${PROVIDERS[provider].label} marked as connected`, 'success');
-}
-
-function disconnectOAuth(provider) {
-  state.oauth[provider] = {
-    connected: false,
-    accessToken: '',
-    accountEmail: '',
-    scopes: [],
-    updatedAt: new Date().toISOString(),
-  };
-
-  const tokenInput = document.getElementById(toInputId(provider, 'oauth-token'));
-  const emailInput = document.getElementById(toInputId(provider, 'oauth-email'));
-  const scopesInput = document.getElementById(toInputId(provider, 'oauth-scopes'));
-  tokenInput.value = '';
-  emailInput.value = '';
-  scopesInput.value = '';
-
-  updateOAuthStatus(provider);
-  setStatus(`${PROVIDERS[provider].label} disconnected`, 'success');
 }
 
 function wireEvents() {
@@ -318,28 +260,21 @@ function wireEvents() {
     setStatus('Reset unsaved changes');
   });
 
-  ui.providerSettings.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const action = target.dataset.action;
-    const provider = target.dataset.provider;
-    if (!action || !provider || !OAUTH_PROVIDERS.includes(provider)) return;
+  ui.addProviderBtn.addEventListener('click', addProviderPrompt);
 
-    if (action === 'oauth-connect') {
-      connectOAuth(provider);
-      return;
-    }
-
-    if (action === 'oauth-disconnect') {
-      disconnectOAuth(provider);
-    }
+  // Auto-detect provider from pasted API key
+  ui.providerList.addEventListener('input', (event) => {
+    if (!event.target.classList.contains('provider-api-key')) return;
+    const row = event.target.closest('.provider-row');
+    if (!row) return;
+    // Auto-detect is only useful if we eventually want to switch providers,
+    // but for now each row already has a known provider
   });
 }
 
 async function init() {
   try {
     buildDefaultProviderOptions();
-    renderProviderCards();
     wireEvents();
 
     const { llmSettings } = await chrome.storage.local.get('llmSettings');

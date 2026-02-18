@@ -109,20 +109,37 @@ textarea {
   resize: vertical;
 }
 
-.provider-settings {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
-  gap: 12px;
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
 
-.provider-card {
+.section-header h2 {
+  margin-bottom: 0;
+}
+
+.icon-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.provider-row {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
   background: #0d1628;
+  margin-bottom: 10px;
 }
 
-.provider-head {
+.provider-row-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -133,22 +150,31 @@ textarea {
   font-weight: 700;
 }
 
-.provider-kind {
-  font-size: 0.75rem;
+.remove-provider-btn {
+  background: none;
+  border: none;
   color: var(--muted);
-  padding: 3px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
-.oauth-actions {
+.remove-provider-btn:hover {
+  color: var(--danger);
+  background: rgba(255, 125, 125, 0.1);
+}
+
+.provider-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.provider-picker {
   display: flex;
   gap: 8px;
-}
-
-.oauth-status {
-  color: var(--muted);
-  font-size: 0.8rem;
+  padding: 8px 0;
 }
 
 .form-actions {
