@@ -1,29 +1,36 @@
 export const PROVIDER_MODELS = {
   openai: [
-    { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', tier: 'fast' },
-    { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', tier: 'balanced' },
-    { id: 'gpt-4.1', label: 'GPT-4.1', tier: 'strong' },
+    { id: 'gpt-5-mini', label: 'GPT-5 Mini', tier: 'fast' },
+    { id: 'gpt-5.2', label: 'GPT-5.2', tier: 'balanced' },
+    { id: 'gpt-5.2-pro', label: 'GPT-5.2 Pro', tier: 'strong' },
   ],
   anthropic: [
-    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', tier: 'balanced' },
-    { id: 'claude-opus-4-20250918', label: 'Claude Opus 4', tier: 'strong' },
+    { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', tier: 'fast' },
+    { id: 'claude-sonnet-4-6-20260217', label: 'Claude Sonnet 4.6', tier: 'balanced' },
+    { id: 'claude-opus-4-6-20260205', label: 'Claude Opus 4.6', tier: 'strong' },
   ],
   google: [
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', tier: 'fast' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', tier: 'strong' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', tier: 'balanced' },
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', tier: 'balanced' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', tier: 'strong' },
+  ],
+  xai: [
+    { id: 'grok-4-1-fast-non-reasoning', label: 'Grok 4.1 Fast', tier: 'fast' },
+    { id: 'grok-4-1-fast-reasoning', label: 'Grok 4.1 Fast Reasoning', tier: 'balanced' },
   ],
 };
 
 export const PROVIDER_CONFIG = {
   openai: {
     label: 'OpenAI',
-    defaultModel: 'gpt-4.1-mini',
+    defaultModel: 'gpt-5.2',
     apiKeyStorageKey: 'openai',
     endpoint: 'https://api.openai.com/v1/chat/completions',
   },
   anthropic: {
     label: 'Anthropic',
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: 'claude-sonnet-4-6-20260217',
     apiKeyStorageKey: 'anthropic',
     endpoint: 'https://api.anthropic.com/v1/messages',
   },
@@ -32,6 +39,12 @@ export const PROVIDER_CONFIG = {
     defaultModel: 'gemini-2.5-flash',
     apiKeyStorageKey: 'google',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+  },
+  xai: {
+    label: 'xAI (Grok)',
+    defaultModel: 'grok-4-1-fast-non-reasoning',
+    apiKeyStorageKey: 'xai',
+    endpoint: 'https://api.x.ai/v1/chat/completions',
   },
   custom: {
     label: 'Custom',
@@ -44,6 +57,27 @@ export const PROVIDER_CONFIG = {
 export const MANAGED_PROVIDERS = Object.keys(PROVIDER_CONFIG).filter(
   (provider) => provider !== 'custom'
 );
+
+export const DEFAULT_PROMPTS = {
+  system: [
+    'You are a CSS-only assistant.',
+    'Generate dark mode CSS for the provided webpage context.',
+    'Return CSS only. Do not include Markdown or explanations.',
+    'Preserve readability and contrast while minimizing layout changes.',
+    'Prefer scoped overrides on common selectors and avoid !important unless necessary.',
+  ].join(' '),
+  user: [
+    'Create CSS that applies a visually pleasing dark theme to this page context.',
+    'Goals:',
+    '- Darken page backgrounds while preserving hierarchy.',
+    '- Use light text with sufficient contrast.',
+    '- Keep links/buttons distinguishable and accessible.',
+    '- Handle forms, tables, cards, and code blocks when present.',
+    '- Do not hide content or change spacing/layout dramatically.',
+    'Page context JSON:',
+    '{{context}}',
+  ].join('\n'),
+};
 
 export function getDefaultLlmSettings() {
   return {
@@ -59,6 +93,10 @@ export function getDefaultLlmSettings() {
       model: '',
       apiKey: '',
       headers: {},
+    },
+    prompts: {
+      activeId: null,
+      custom: [],
     },
   };
 }
@@ -85,6 +123,10 @@ export function mergeLlmSettings(rawSettings) {
         ...defaults.customEndpoint.headers,
         ...(((settings.customEndpoint || {}).headers) || {}),
       },
+    },
+    prompts: {
+      activeId: settings.prompts?.activeId ?? null,
+      custom: Array.isArray(settings.prompts?.custom) ? settings.prompts.custom : [],
     },
   };
 }

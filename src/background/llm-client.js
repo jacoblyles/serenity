@@ -1,4 +1,5 @@
 import { PROVIDER_CONFIG, isHttpsUrl, mergeLlmSettings } from '../shared/llm-settings.js';
+import { resolveOAuth, validateOAuth, getOAuthHeaders } from './oauth.js';
 
 function normalizeMessages(messages, systemPrompt) {
   const normalized = [];
@@ -107,24 +108,8 @@ function getApiKeyForProvider(provider, settings, apiKeyOverride) {
 }
 
 function resolveAuthForProvider(provider, settings, apiKeyOverride) {
-  if (provider === 'custom') {
-    return {
-      type: 'apiKey',
-      credential: getApiKeyForProvider(provider, settings, apiKeyOverride),
-    };
-  }
-
-  const authMode =
-    settings.authModes && settings.authModes[provider] === 'oauth' ? 'oauth' : 'apiKey';
-
-  if (provider === 'anthropic' && authMode === 'oauth') {
-    const oauth = settings.oauth && settings.oauth[provider];
-    return {
-      type: 'oauth',
-      connected: Boolean(oauth && oauth.connected),
-      credential: oauth && typeof oauth.accessToken === 'string' ? oauth.accessToken : '',
-    };
-  }
+  const oauthResult = resolveOAuth(provider, settings);
+  if (oauthResult) return oauthResult;
 
   return {
     type: 'apiKey',
@@ -148,15 +133,7 @@ function ensureRequiredConfig(provider, model, auth, settings, endpointOverride)
     return;
   }
 
-  if (provider === 'anthropic' && auth.type === 'oauth') {
-    if (!auth.connected) {
-      throw new Error('Anthropic OAuth is selected but not connected');
-    }
-    if (!auth.credential) {
-      throw new Error('Anthropic OAuth is selected but access token is missing');
-    }
-    return;
-  }
+  if (validateOAuth(provider, auth)) return;
 
   if (!auth.credential) {
     throw new Error(`Missing API key for provider "${provider}"`);
@@ -223,9 +200,7 @@ async function requestAnthropicCompletion({
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(auth.type === 'oauth'
-        ? { authorization: `Bearer ${auth.credential}` }
-        : { 'x-api-key': auth.credential }),
+      ...(getOAuthHeaders(auth) || { 'x-api-key': auth.credential }),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -433,6 +408,19 @@ export async function completeLlmRequest(request = {}) {
         provider,
         model,
         ...(await requestGoogleCompletion({
+          endpoint,
+          apiKey: auth.credential,
+          model,
+          messages,
+          temperature: request.temperature,
+          maxTokens: request.maxTokens,
+        })),
+      };
+    case 'xai':
+      return {
+        provider,
+        model,
+        ...(await requestOpenAiLikeCompletion({
           endpoint,
           apiKey: auth.credential,
           model,

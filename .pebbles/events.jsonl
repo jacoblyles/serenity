@@ -134,3 +134,7 @@
 {"type":"create","timestamp":"2026-02-21T02:05:38.228641Z","issue_id":"darkside2-f8b","payload":{"description":"New Sites tab in settings to manage generated dark mode styles. Shows list of all domains with saved styles. Each site card has: first-letter avatar, domain name, version count, page count. Click to expand version list (newest first). Each version shows: active badge, timestamp, provider/model, CSS preview (truncated). Actions per version: Activate (set as active), Delete. Delete all button per domain. Empty state when no sites. Lazy-loads data on first tab visit. Saves immediately (no Save/Reset needed). Files: options.html, options.css, options.js. Depends on version history schema and tab navigation.","priority":"1","title":"Sites management tab in settings","type":"feature"}}
 {"type":"dep_add","timestamp":"2026-02-21T02:05:42.664963Z","issue_id":"darkside2-f8b","payload":{"dep_type":"blocks","depends_on":"darkside2-fde"}}
 {"type":"dep_add","timestamp":"2026-02-21T02:05:42.750154Z","issue_id":"darkside2-f8b","payload":{"dep_type":"blocks","depends_on":"darkside2-381"}}
+{"type":"status_update","timestamp":"2026-02-21T02:06:58.035975Z","issue_id":"darkside2-381","payload":{"status":"in_progress"}}
+{"type":"status_update","timestamp":"2026-02-21T02:07:04.435466Z","issue_id":"darkside2-fde","payload":{"status":"in_progress"}}
+{"type":"close","timestamp":"2026-02-21T02:09:22.58926Z","issue_id":"darkside2-fde","payload":{}}
+{"type":"close","timestamp":"2026-02-21T02:11:12.190772Z","issue_id":"darkside2-381","payload":{}}

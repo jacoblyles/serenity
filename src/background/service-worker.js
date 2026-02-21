@@ -2,6 +2,8 @@
 // Handles messaging between popup/content scripts and LLM providers
 
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
+import { mergeLlmSettings } from '../shared/llm-settings.js';
+import { log } from '../shared/logger.js';
 
 const STYLE_STORAGE_KEY = 'darkModeStyles';
 const MAX_FEEDBACK_IMAGES = 3;
@@ -13,7 +15,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
     enabled: false,
     autoMode: false,
-    selectedModel: 'gpt-4.1-mini',
+    selectedModel: 'gpt-5.2',
     feedbackText: '',
     feedbackImages: [],
   });
@@ -160,7 +162,7 @@ async function handleGetPopupState() {
   return {
     enabled: Boolean(state.enabled),
     autoMode: Boolean(state.autoMode),
-    selectedModel: state.selectedModel || 'gpt-4.1-mini',
+    selectedModel: state.selectedModel || 'gpt-5.2',
     feedbackText: state.feedbackText || '',
     feedbackImages: sanitizeFeedbackImages(state.feedbackImages),
   };
@@ -344,11 +346,39 @@ function resolveTabId(message, sender) {
 }
 
 async function generateAndApplyDarkMode(tabId, options = {}) {
+  log.info('generate', 'Starting dark mode generation', { tabId, options: { provider: options.provider, model: options.model } });
+
+  // Detect if the page already has dark mode
+  try {
+    const detection = await chrome.tabs.sendMessage(tabId, { type: 'detect-dark-mode' });
+    if (detection?.isDark) {
+      log.info('generate', 'Page already has dark mode, skipping generation', { signals: detection.signals });
+      return { css: null, skipped: true, reason: 'Page already has a dark mode', signals: detection.signals };
+    }
+    log.info('generate', 'Dark mode detection', { isDark: false, signals: detection?.signals });
+  } catch (_error) {
+    log.warn('generate', 'Dark mode detection failed, proceeding with generation');
+  }
+
   let pageContext;
   try {
     pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
+    log.info('generate', 'Extracted page context', { nodeCount: pageContext?.nodeCount, truncated: pageContext?.truncated, url: pageContext?.url });
   } catch (_error) {
+    log.error('generate', 'Failed to extract page context', { tabId });
     return { css: null, error: 'Unable to extract page context from content script' };
+  }
+
+  const activePrompts = await getActivePrompts();
+  log.info('generate', 'Using prompts', { custom: Boolean(activePrompts.system || activePrompts.user) });
+  const contextJson = JSON.stringify(sanitizePageContext(pageContext));
+  let userContent;
+  if (activePrompts.user) {
+    userContent = activePrompts.user.includes('{{context}}')
+      ? activePrompts.user.replace('{{context}}', contextJson)
+      : `${activePrompts.user}\n\nPage context JSON:\n${contextJson}`;
+  } else {
+    userContent = buildDarkModeUserPrompt(pageContext);
   }
 
   const request = {
@@ -356,30 +386,40 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     model: typeof options.model === 'string' ? options.model : undefined,
     temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
     maxTokens: typeof options.maxTokens === 'number' ? options.maxTokens : 1500,
-    systemPrompt: buildDarkModeSystemPrompt(),
+    systemPrompt: activePrompts.system || buildDarkModeSystemPrompt(),
     messages: [
       {
         role: 'user',
-        content: buildDarkModeUserPrompt(pageContext),
+        content: userContent,
       },
     ],
   };
 
+  log.info('generate', 'Sending LLM request', { provider: request.provider, model: request.model, messageLength: typeof userContent === 'string' ? userContent.length : 0 });
+
   let llmResult;
   try {
     llmResult = await completeLlmRequest(request);
+    log.info('generate', 'LLM response received', { provider: llmResult.provider, model: llmResult.model, textLength: llmResult.text?.length || 0 });
   } catch (error) {
-    return { css: null, error: error instanceof Error ? error.message : 'Failed to generate CSS' };
+    const msg = error instanceof Error ? error.message : 'Failed to generate CSS';
+    log.error('generate', 'LLM request failed', { error: msg });
+    return { css: null, error: msg };
   }
 
   const css = extractCssFromModelText(llmResult.text || '');
   if (!css) {
+    log.warn('generate', 'Response did not contain valid CSS', { rawTextPreview: (llmResult.text || '').slice(0, 200) });
     return { css: null, error: 'Provider response did not contain valid CSS' };
   }
 
+  log.info('generate', 'CSS extracted', { cssLength: css.length });
+
   try {
     await chrome.tabs.sendMessage(tabId, { type: 'apply-css', css });
+    log.info('generate', 'CSS applied to tab', { tabId });
   } catch (_error) {
+    log.error('generate', 'Failed to apply CSS to tab', { tabId });
     return { css: null, error: 'Generated CSS, but failed to apply it to the page' };
   }
 
@@ -394,13 +434,17 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
 }
 
 async function handleRefineDarkMode(message, sender) {
+  log.info('refine', 'Starting dark mode refinement');
+
   const tabId = await resolveTabIdWithFallback(message, sender);
   if (tabId === null) {
+    log.error('refine', 'No active tab available');
     return { css: null, error: 'No active tab available for refinement' };
   }
 
   const feedback = await resolveRefinementFeedback(message);
   const feedbackImages = await resolveRefinementImages(message);
+  log.info('refine', 'Feedback resolved', { feedbackLength: feedback?.length || 0, imageCount: feedbackImages.length });
   if (!feedback && feedbackImages.length === 0) {
     return { css: null, error: 'Feedback text or screenshot is required for refinement' };
   }
@@ -409,13 +453,16 @@ async function handleRefineDarkMode(message, sender) {
   try {
     pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
   } catch (_error) {
+    log.error('refine', 'Failed to extract page context');
     return { css: null, error: 'Unable to extract page context from content script' };
   }
 
   const currentCss = await resolveCurrentCssForRefinement(message, sender, tabId);
   if (!currentCss) {
+    log.warn('refine', 'No current CSS found to refine');
     return { css: null, error: 'No current CSS found to refine' };
   }
+  log.info('refine', 'Current CSS resolved', { cssLength: currentCss.length });
 
   const request = {
     provider: typeof message.provider === 'string' ? message.provider : undefined,
@@ -436,21 +483,29 @@ async function handleRefineDarkMode(message, sender) {
     ],
   };
 
+  log.info('refine', 'Sending LLM request', { provider: request.provider, model: request.model });
+
   let llmResult;
   try {
     llmResult = await completeLlmRequest(request);
+    log.info('refine', 'LLM response received', { provider: llmResult.provider, model: llmResult.model, textLength: llmResult.text?.length || 0 });
   } catch (error) {
-    return { css: null, error: error instanceof Error ? error.message : 'Failed to refine CSS' };
+    const msg = error instanceof Error ? error.message : 'Failed to refine CSS';
+    log.error('refine', 'LLM request failed', { error: msg });
+    return { css: null, error: msg };
   }
 
   const css = extractCssFromModelText(llmResult.text || '');
   if (!css) {
+    log.warn('refine', 'Response did not contain valid CSS', { rawTextPreview: (llmResult.text || '').slice(0, 200) });
     return { css: null, error: 'Provider response did not contain valid CSS' };
   }
 
   try {
     await chrome.tabs.sendMessage(tabId, { type: 'apply-css', css });
+    log.info('refine', 'Refined CSS applied', { tabId, cssLength: css.length });
   } catch (_error) {
+    log.error('refine', 'Failed to apply refined CSS');
     return { css: null, error: 'Refined CSS generated, but failed to apply it to the page' };
   }
 
@@ -479,6 +534,27 @@ async function resolveTabIdWithFallback(message, sender) {
   } catch {
     return null;
   }
+}
+
+async function getActivePrompts() {
+  const { llmSettings } = await chrome.storage.local.get('llmSettings');
+  const settings = mergeLlmSettings(llmSettings);
+
+  if (!settings.prompts?.activeId) {
+    return { system: null, user: null };
+  }
+
+  const custom = (settings.prompts.custom || []).find(
+    (p) => p.id === settings.prompts.activeId
+  );
+  if (!custom) {
+    return { system: null, user: null };
+  }
+
+  return {
+    system: custom.system || null,
+    user: custom.user || null,
+  };
 }
 
 function buildDarkModeSystemPrompt() {

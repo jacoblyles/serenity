@@ -57,6 +57,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'remove-css': () => { removeCSS(); return { removed: true }; },
     'get-applied-css': () => ({ css: getInjectedCSS() }),
     'extract-dom': () => extractDOM(),
+    'detect-dark-mode': () => detectExistingDarkMode(),
   };
 
   const handler = handlers[message.type];
@@ -200,4 +201,83 @@ function extractDOM() {
   return {
     ...result,
   };
+}
+
+function detectExistingDarkMode() {
+  const signals = [];
+
+  // Check <meta name="color-scheme">
+  const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+  if (colorSchemeMeta) {
+    const content = (colorSchemeMeta.getAttribute('content') || '').toLowerCase();
+    if (content.includes('dark')) {
+      signals.push('meta-color-scheme');
+    }
+  }
+
+  // Check CSS color-scheme property on root
+  const rootStyle = getComputedStyle(document.documentElement);
+  if (rootStyle.colorScheme && rootStyle.colorScheme.includes('dark')) {
+    signals.push('css-color-scheme');
+  }
+
+  // Check background luminance on html and body
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    const bg = getComputedStyle(el).backgroundColor;
+    const lum = parseLuminance(bg);
+    if (lum !== null && lum < 0.2) {
+      signals.push(el === document.documentElement ? 'html-dark-bg' : 'body-dark-bg');
+    }
+  }
+
+  // Check common dark-mode class names on html/body
+  const darkClassPattern = /\b(dark|dark[-_]mode|dark[-_]theme|theme[-_]dark|night)\b/i;
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    if (darkClassPattern.test(el.className)) {
+      signals.push('dark-class');
+      break;
+    }
+    if (el.dataset.theme && /dark|night/i.test(el.dataset.theme)) {
+      signals.push('data-theme-dark');
+      break;
+    }
+  }
+
+  // Check for prefers-color-scheme: dark rules in stylesheets
+  try {
+    for (const sheet of document.styleSheets) {
+      if (hasDarkMediaRule(sheet)) {
+        signals.push('media-prefers-dark');
+        break;
+      }
+    }
+  } catch {
+    // Cross-origin stylesheets can't be inspected
+  }
+
+  const isDark = signals.length >= 2 || signals.includes('body-dark-bg') || signals.includes('html-dark-bg');
+  return { isDark, signals };
+}
+
+function hasDarkMediaRule(sheet) {
+  let rules;
+  try { rules = sheet.cssRules || sheet.rules; } catch { return false; }
+  if (!rules) return false;
+
+  for (const rule of rules) {
+    if (rule.type === CSSRule.MEDIA_RULE && /prefers-color-scheme\s*:\s*dark/.test(rule.conditionText)) {
+      if (rule.cssRules && rule.cssRules.length > 0) return true;
+    }
+  }
+  return false;
+}
+
+function parseLuminance(bgColor) {
+  if (!bgColor || bgColor === 'transparent' || bgColor === 'rgba(0, 0, 0, 0)') return null;
+  const match = bgColor.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return null;
+  const [r, g, b] = [+match[1] / 255, +match[2] / 255, +match[3] / 255];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }

@@ -3,63 +3,71 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="options.css">
-  <title>Serenity Settings</title>
+  <title>Serenity — Settings</title>
 </head>
 <body>
-  <main class="container">
-    <header class="page-header">
-      <h1>Serenity Settings</h1>
-      <p class="page-subtitle">Configure your AI providers and preferences.</p>
+  <main>
+    <header>
+      <h1>Serenity</h1>
+      <p class="subtitle">Settings</p>
     </header>
 
-    <form id="settings-form">
-      <section class="card">
-        <h2>Defaults</h2>
-        <div class="field-grid">
-          <label class="field">
-            <span class="field-label">Default provider</span>
-            <select id="default-provider" required></select>
-          </label>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="section-header">
-          <h2>Providers</h2>
-          <button type="button" id="add-provider-btn" class="button icon-button" title="Add provider">+</button>
-        </div>
-        <div id="provider-list"></div>
-      </section>
-
-      <section class="card">
-        <h2>Custom Endpoint</h2>
-        <div class="field-grid">
-          <label class="field">
-            <span class="field-label">Endpoint URL</span>
-            <input id="custom-endpoint-url" type="url" placeholder="https://api.example.com/v1/chat/completions">
-          </label>
-          <label class="field">
-            <span class="field-label">Custom model</span>
-            <input id="custom-model" type="text" placeholder="your-model-id">
-          </label>
-          <label class="field">
-            <span class="field-label">Custom API key</span>
-            <input id="custom-api-key" type="password" autocomplete="off" placeholder="sk-...">
-          </label>
-          <label class="field full-width">
-            <span class="field-label">Custom headers (JSON object)</span>
-            <textarea id="custom-headers" rows="5" placeholder='{"x-api-key": "..."}'></textarea>
-          </label>
-        </div>
-      </section>
-
-      <div class="form-actions">
-        <button type="submit" class="button primary">Save settings</button>
-        <button type="button" id="reset-btn" class="button">Reset</button>
-        <p id="status" role="status" aria-live="polite"></p>
+    <section class="section">
+      <div class="section-head">
+        <h2>Providers</h2>
+        <button type="button" id="add-provider" class="add-btn" title="Add provider">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
       </div>
-    </form>
+      <div id="provider-cards" class="cards"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Prompts</h2>
+        <button type="button" id="add-prompt" class="add-btn" title="Add custom prompt">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div id="prompt-cards" class="cards"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Debug</h2>
+      </div>
+      <div class="card">
+        <div class="debug-toggle-row">
+          <span class="debug-label">Debug logging</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="debug-toggle">
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+        <div id="log-viewer-wrap" style="display:none">
+          <div class="log-toolbar">
+            <span id="log-count" class="log-count"></span>
+            <button type="button" id="refresh-logs-btn" class="btn-sm">Refresh</button>
+            <button type="button" id="clear-logs-btn" class="btn-sm danger">Clear</button>
+          </div>
+          <div id="log-viewer" class="log-viewer"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="actions-bar">
+      <div class="actions-group">
+        <button type="button" id="save-btn" class="btn primary">Save</button>
+        <button type="button" id="reset-btn" class="btn ghost">Reset</button>
+      </div>
+      <span id="status" role="status" aria-live="polite"></span>
+    </footer>
   </main>
 
   <script type="module" src="options.js"></script>

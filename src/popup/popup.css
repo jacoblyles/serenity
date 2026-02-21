@@ -386,6 +386,42 @@ h1 {
   border-color: #e06060;
 }
 
+/* === Refine button === */
+#refine-dark-mode-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-top: 10px;
+  background: linear-gradient(135deg, #5a52e0, #6c63ff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(108, 99, 255, 0.25);
+}
+
+#refine-dark-mode-btn:hover {
+  opacity: 0.92;
+  box-shadow: 0 3px 12px rgba(108, 99, 255, 0.35);
+}
+
+#refine-dark-mode-btn:active {
+  transform: scale(0.985);
+}
+
+#refine-dark-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
 /* === Status === */
 #status {
   font-size: 12px;

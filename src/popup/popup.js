@@ -12,10 +12,12 @@ const feedbackText = document.getElementById('feedback-text');
 const feedbackImageBtn = document.getElementById('feedback-image-btn');
 const feedbackImageInput = document.getElementById('feedback-image-input');
 const feedbackImageList = document.getElementById('feedback-image-list');
+const refineDarkModeBtn = document.getElementById('refine-dark-mode-btn');
 const status = document.getElementById('status');
 let feedbackSaveTimer = null;
 let feedbackImages = [];
 let isGenerating = false;
+let isRefining = false;
 
 const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
@@ -214,9 +216,14 @@ generateDarkModeBtn.addEventListener('click', async () => {
     const result = await chrome.runtime.sendMessage({
       type: 'generate-dark-mode',
       tabId: activeTab.id,
+      provider: providerSelector.value,
       model: modelSelector.value,
     });
 
+    if (result?.skipped) {
+      status.textContent = 'This site already has a dark mode';
+      return;
+    }
     if (result?.error) {
       throw new Error(result.error);
     }
@@ -239,6 +246,66 @@ generateDarkModeBtn.addEventListener('click', async () => {
     status.textContent = error instanceof Error ? error.message : 'Failed to generate dark mode';
   } finally {
     setGenerateInFlight(false);
+  }
+});
+
+refineDarkModeBtn.addEventListener('click', async () => {
+  if (isRefining) return;
+
+  const feedback = feedbackText.value.trim();
+  if (!feedback && feedbackImages.length === 0) {
+    status.textContent = 'Enter feedback or attach a screenshot first';
+    return;
+  }
+
+  isRefining = true;
+  refineDarkModeBtn.disabled = true;
+  const icon = refineDarkModeBtn.querySelector('.btn-icon');
+  if (icon) icon.style.display = 'none';
+  refineDarkModeBtn.lastChild.textContent = 'Refining\u2026';
+  status.textContent = 'Refining dark mode\u2026';
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    if (!Number.isInteger(activeTab?.id)) {
+      throw new Error('No active tab available');
+    }
+
+    const result = await chrome.runtime.sendMessage({
+      type: 'refine-dark-mode',
+      tabId: activeTab.id,
+      provider: providerSelector.value,
+      model: modelSelector.value,
+      feedback,
+      feedbackImages,
+    });
+
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+    if (!result?.css) {
+      throw new Error('No refined CSS was generated');
+    }
+
+    const saved = await chrome.runtime.sendMessage({
+      type: 'save-stored-style',
+      url: activeTab.url,
+      css: result.css,
+      scope: 'domain',
+    });
+    if (!saved?.ok) {
+      throw new Error(saved?.error || 'Refined CSS generated but could not save it');
+    }
+
+    status.textContent = 'Refined and saved';
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : 'Failed to refine dark mode';
+  } finally {
+    isRefining = false;
+    refineDarkModeBtn.disabled = false;
+    if (icon) icon.style.display = '';
+    refineDarkModeBtn.lastChild.textContent = 'Refine';
   }
 });
 
