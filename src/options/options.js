@@ -8,6 +8,7 @@ import {
   mergeLlmSettings,
 } from '../shared/llm-settings.js';
 import { getLogs, clearLogs, setLogging, getLoggingEnabled } from '../shared/logger.js';
+import { getMetrics, clearMetrics, SUPPORTED_MODES } from '../shared/metrics.js';
 import { STYLE_STORAGE_KEY, ensureMigratedStyles } from '../shared/style-storage.js';
 
 const ALL_PROVIDERS = [...MANAGED_PROVIDERS, 'custom'];
@@ -23,6 +24,13 @@ const statusEl = $('#status');
 const actionsBar = $('.actions-bar');
 const sitesList = $('#sites-list');
 const sitesCount = $('#sites-count');
+const statsTotalEl = $('#stats-total');
+const statsSuccessRateEl = $('#stats-success-rate');
+const statsAverageTimeEl = $('#stats-average-time');
+const statsNativeCountEl = $('#stats-native-count');
+const statsByModeEl = $('#stats-by-mode');
+const statsByProviderEl = $('#stats-by-provider');
+const clearStatsBtn = $('#clear-stats-btn');
 
 let state = getDefaultLlmSettings();
 let visibleProviders = [];
@@ -63,6 +71,60 @@ function escapeHtml(str) {
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function formatDuration(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return '0 ms';
+  if (durationMs < 1000) return `${Math.round(durationMs)} ms`;
+  return `${(durationMs / 1000).toFixed(2)} s`;
+}
+
+function renderStatsRows(container, entries, formatter) {
+  if (!entries.length) {
+    container.innerHTML = '<div class="stats-empty">No data yet</div>';
+    return;
+  }
+
+  container.innerHTML = entries
+    .map(([name, value]) => {
+      const prettyName = String(name || '').trim() || 'unknown';
+      return `<div class="stats-row">
+        <span class="stats-row-name">${escapeHtml(prettyName)}</span>
+        <span class="stats-row-value">${escapeHtml(formatter(value))}</span>
+      </div>`;
+    })
+    .join('');
+}
+
+async function renderStatistics() {
+  const metrics = await getMetrics();
+  const total = Number(metrics.totalGenerations) || 0;
+  const success = Number(metrics.successCount) || 0;
+  const successRate = total > 0 ? (success / total) * 100 : 0;
+
+  statsTotalEl.textContent = String(total);
+  statsSuccessRateEl.textContent = `${successRate.toFixed(1)}%`;
+  statsNativeCountEl.textContent = String(Number(metrics.nativeDarkModeCount) || 0);
+
+  const modeBuckets = Object.entries(metrics.byMode || {});
+  const totalModeMs = modeBuckets.reduce((sum, [, bucket]) => sum + (Number(bucket?.totalMs) || 0), 0);
+  const averageMs = success > 0 ? totalModeMs / success : 0;
+  statsAverageTimeEl.textContent = formatDuration(averageMs);
+
+  const orderedModeEntries = SUPPORTED_MODES.map((mode) => [mode, metrics.byMode?.[mode] || { count: 0, totalMs: 0 }]);
+  renderStatsRows(statsByModeEl, orderedModeEntries, (bucket) => {
+    const count = Number(bucket?.count) || 0;
+    const avgMs = count > 0 ? (Number(bucket?.totalMs) || 0) / count : 0;
+    return `${count} (${formatDuration(avgMs)} avg)`;
+  });
+
+  const providerEntries = Object.entries(metrics.byProvider || {})
+    .sort((a, b) => (Number(b[1]?.count) || 0) - (Number(a[1]?.count) || 0));
+  renderStatsRows(statsByProviderEl, providerEntries, (bucket) => {
+    const count = Number(bucket?.count) || 0;
+    const avgMs = count > 0 ? (Number(bucket?.totalMs) || 0) / count : 0;
+    return `${count} (${formatDuration(avgMs)} avg)`;
+  });
 }
 
 // ─── Tab Switching ───
@@ -826,8 +888,15 @@ async function init() {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
   });
 
+  clearStatsBtn.addEventListener('click', async () => {
+    await clearMetrics();
+    await renderStatistics();
+    flash('Statistics cleared', 'success');
+  });
+
   switchTab('providers');
   initDebugUI();
+  renderStatistics();
 }
 
 init();

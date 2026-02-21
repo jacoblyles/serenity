@@ -6,6 +6,11 @@ import { runAgentLoop } from './agent.js';
 import { mergeLlmSettings, PROVIDER_MODELS } from '../shared/llm-settings.js';
 import { log } from '../shared/logger.js';
 import {
+  generationStarted,
+  generationCompleted,
+  generationFailed,
+} from '../shared/metrics.js';
+import {
   STYLE_STORAGE_KEY,
   MAX_VERSIONS,
   ensureMigratedStyles,
@@ -467,8 +472,70 @@ function resolveTabId(message, sender) {
   return null;
 }
 
+function getGenerationMode(twoPass, options = {}) {
+  if (options.mode === 'agent') return 'agent';
+  return twoPass ? 'two-pass' : 'single-pass';
+}
+
+async function resolveGenerationMetricsUrl(tabId, options = {}) {
+  if (typeof options.url === 'string' && options.url.trim()) {
+    return options.url.trim();
+  }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (typeof tab?.url === 'string' && tab.url.trim()) {
+      return tab.url.trim();
+    }
+  } catch {
+    // Ignore tabs that cannot be queried for URL context.
+  }
+  return 'unknown';
+}
+
 async function generateAndApplyDarkMode(tabId, options = {}) {
   const twoPass = typeof options.twoPass === 'boolean' ? options.twoPass : true;
+  const mode = getGenerationMode(twoPass, options);
+  const metricsUrl = await resolveGenerationMetricsUrl(tabId, options);
+  let startedAt = 0;
+
+  async function startGenerationMetrics() {
+    if (startedAt > 0) return;
+    startedAt = Date.now();
+    await generationStarted(metricsUrl, mode);
+  }
+
+  async function failGenerationMetrics(errorMessage) {
+    if (startedAt <= 0) return;
+    await generationFailed(metricsUrl, mode, {
+      message: errorMessage,
+      durationMs: Math.max(0, Date.now() - startedAt),
+    });
+  }
+
+  async function completeGenerationMetrics(result, turnsUsed) {
+    if (startedAt <= 0) return;
+    const cssLength = typeof result?.css === 'string' ? result.css.length : 0;
+    await generationCompleted(metricsUrl, mode, {
+      provider: result?.provider || null,
+      model: result?.model || null,
+      cssLength,
+      turnsUsed,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      usedNativeDarkCss: Boolean(result?.usedNativeDarkModeCss),
+      error: result?.error || null,
+    });
+  }
+
+  async function returnFailure(errorMessage) {
+    await failGenerationMetrics(errorMessage);
+    return { css: null, error: errorMessage };
+  }
+
+  async function returnSuccess(result, turnsUsed) {
+    await completeGenerationMetrics(result, turnsUsed);
+    return result;
+  }
+
   log.info('generate', 'Starting dark mode generation', {
     tabId,
     options: { provider: options.provider, model: options.model, twoPass },
@@ -486,6 +553,8 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     log.warn('generate', 'Dark mode detection failed, proceeding with generation');
   }
 
+  await startGenerationMetrics();
+
   let pageContext;
   try {
     pageContext = await extractPageContext(tabId);
@@ -497,7 +566,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     });
   } catch (_error) {
     log.error('generate', 'Failed to extract page context', { tabId });
-    return { css: null, error: await getContentScriptUnavailableError(tabId) };
+    return returnFailure(await getContentScriptUnavailableError(tabId));
   }
 
   let extractedNativeDarkCss = '';
@@ -517,7 +586,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
         cssBytes: extractedNativeDarkCssBytes,
       });
       log.info('generate', 'Final CSS selected', { finalPass: 0, source: 'native-dark-mode-css' });
-      return {
+      return returnSuccess({
         css: extractedNativeDarkCss,
         applied: true,
         provider: null,
@@ -527,7 +596,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
         nativeDarkCssBytes: extractedNativeDarkCssBytes,
         truncatedContext: Boolean(pageContext?.truncated),
         nodeCount: pageContext?.nodeCount || 0,
-      };
+      }, 0);
     } catch {
       log.warn('generate', 'Failed to apply extracted native dark CSS; falling back to LLM flow');
     }
@@ -620,13 +689,13 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to generate CSS';
     log.error('generate', 'LLM request failed', { error: msg });
-    return { css: null, error: msg };
+    return returnFailure(msg);
   }
 
   const css = extractCssFromModelText(llmResult.text || '');
   if (!css) {
     log.warn('generate', 'Response did not contain valid CSS', { rawTextPreview: (llmResult.text || '').slice(0, 200) });
-    return { css: null, error: 'Provider response did not contain valid CSS' };
+    return returnFailure('Provider response did not contain valid CSS');
   }
 
   log.info('generate', 'CSS extracted', { cssLength: css.length });
@@ -636,7 +705,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     log.info('generate', 'CSS applied to tab', { tabId });
   } catch (_error) {
     log.error('generate', 'Failed to apply CSS to tab', { tabId });
-    return { css: null, error: 'Generated CSS, but failed to apply it to the page' };
+    return returnFailure('Generated CSS, but failed to apply it to the page');
   }
 
   const passOneResult = {
@@ -653,7 +722,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
 
   if (!twoPass) {
     log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', twoPassEnabled: false });
-    return passOneResult;
+    return returnSuccess(passOneResult, 1);
   }
 
   const autoFeedback = [
@@ -670,14 +739,14 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     const message = error instanceof Error ? error.message : String(error || 'unknown capture error');
     log.warn('generate', 'Two-pass refinement skipped: unable to capture screenshot', { tabId, error: message });
     log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'screenshot-capture-failed' });
-    return passOneResult;
+    return returnSuccess(passOneResult, 1);
   }
 
   const sanitizedScreenshot = sanitizeGenerationScreenshotDataUrl(passTwoScreenshotDataUrl);
   if (!sanitizedScreenshot) {
     log.warn('generate', 'Two-pass refinement skipped: screenshot data invalid');
     log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'screenshot-invalid' });
-    return passOneResult;
+    return returnSuccess(passOneResult, 1);
   }
 
   const refineRequest = {
@@ -711,14 +780,14 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     const message = error instanceof Error ? error.message : String(error || 'unknown error');
     log.warn('generate', 'Two-pass refinement failed; keeping pass 1 CSS', { error: message });
     log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'refine-llm-failed' });
-    return passOneResult;
+    return returnSuccess(passOneResult, 1);
   }
 
   const refinedCss = extractCssFromModelText(refineResult.text || '');
   if (!refinedCss) {
     log.warn('generate', 'Two-pass refinement returned invalid CSS; keeping pass 1 CSS');
     log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'refine-css-invalid' });
-    return passOneResult;
+    return returnSuccess(passOneResult, 1);
   }
 
   try {
@@ -727,12 +796,12 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     const message = error instanceof Error ? error.message : String(error || 'unknown error');
     log.warn('generate', 'Two-pass refined CSS could not be applied; keeping pass 1 CSS', { error: message });
     log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'refined-css-apply-failed' });
-    return passOneResult;
+    return returnSuccess(passOneResult, 1);
   }
 
   log.info('generate', 'Final CSS selected', { finalPass: 2, source: 'generation-pass-2' });
 
-  return {
+  return returnSuccess({
     css: refinedCss,
     applied: true,
     provider: refineResult.provider,
@@ -742,7 +811,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     nativeDarkCssBytes: extractedNativeDarkCssBytes,
     truncatedContext: Boolean(pageContext?.truncated),
     nodeCount: pageContext?.nodeCount || 0,
-  };
+  }, 2);
 }
 
 async function captureGenerationRefinementScreenshot(tabId) {
