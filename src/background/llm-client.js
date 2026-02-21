@@ -202,6 +202,7 @@ async function requestAnthropicCompletion({
       'content-type': 'application/json',
       ...(getOAuthHeaders(auth) || { 'x-api-key': auth.credential }),
       'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model,

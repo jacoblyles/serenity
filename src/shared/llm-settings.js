@@ -6,8 +6,8 @@ export const PROVIDER_MODELS = {
   ],
   anthropic: [
     { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', tier: 'fast' },
-    { id: 'claude-sonnet-4-6-20260217', label: 'Claude Sonnet 4.6', tier: 'balanced' },
-    { id: 'claude-opus-4-6-20260205', label: 'Claude Opus 4.6', tier: 'strong' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', tier: 'balanced' },
+    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', tier: 'strong' },
   ],
   google: [
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', tier: 'fast' },
@@ -30,7 +30,7 @@ export const PROVIDER_CONFIG = {
   },
   anthropic: {
     label: 'Anthropic',
-    defaultModel: 'claude-sonnet-4-6-20260217',
+    defaultModel: 'claude-sonnet-4-6',
     apiKeyStorageKey: 'anthropic',
     endpoint: 'https://api.anthropic.com/v1/messages',
   },

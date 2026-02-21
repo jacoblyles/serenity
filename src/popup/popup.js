@@ -23,6 +23,9 @@ const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
 const MAX_FEEDBACK_IMAGE_DIMENSION = 1600;
 const IMAGE_NAME_MAX_LENGTH = 80;
+const GENERATION_SCREENSHOT_PROVIDERS = new Set(['anthropic']);
+const MAX_GENERATION_SCREENSHOT_BYTES = 350000;
+const MAX_GENERATION_SCREENSHOT_DIMENSION = 1280;
 
 function buildProviderOptions() {
   for (const key of MANAGED_PROVIDERS) {
@@ -102,6 +105,61 @@ function setGenerateInFlight(inFlight) {
     if (icon) icon.style.display = '';
     generateDarkModeBtn.lastChild.textContent = 'Generate dark mode';
   }
+}
+
+function shouldAttachGenerationScreenshot(provider) {
+  return GENERATION_SCREENSHOT_PROVIDERS.has(provider);
+}
+
+async function captureGenerationScreenshot(windowId) {
+  try {
+    const rawDataUrl = await chrome.tabs.captureVisibleTab(windowId, {
+      format: 'jpeg',
+      quality: 68,
+    });
+    return await compressGenerationScreenshot(rawDataUrl);
+  } catch {
+    return null;
+  }
+}
+
+async function compressGenerationScreenshot(dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return null;
+  }
+
+  const sourceBlob = await dataUrlToBlob(dataUrl);
+  const imageBitmap = await createImageBitmap(sourceBlob);
+  const { width, height } = imageBitmap;
+  const scale = Math.min(1, MAX_GENERATION_SCREENSHOT_DIMENSION / Math.max(width, height));
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    imageBitmap.close();
+    return null;
+  }
+  ctx.drawImage(imageBitmap, 0, 0, targetWidth, targetHeight);
+  imageBitmap.close();
+
+  let quality = 0.72;
+  let blob = await canvasToBlob(canvas, 'image/webp', quality);
+  while (blob && blob.size > MAX_GENERATION_SCREENSHOT_BYTES && quality > 0.42) {
+    quality -= 0.1;
+    blob = await canvasToBlob(canvas, 'image/webp', quality);
+  }
+
+  if (!blob || blob.size > MAX_GENERATION_SCREENSHOT_BYTES) return null;
+  return blobToDataUrl(blob);
+}
+
+async function dataUrlToBlob(dataUrl) {
+  const response = await fetch(dataUrl);
+  return response.blob();
 }
 
 async function init() {
@@ -212,12 +270,19 @@ generateDarkModeBtn.addEventListener('click', async () => {
     if (!Number.isInteger(activeTab?.id)) {
       throw new Error('No active tab available');
     }
+    const provider = providerSelector.value;
+    const model = modelSelector.value;
+    const screenshotDataUrl =
+      shouldAttachGenerationScreenshot(provider) && Number.isInteger(activeTab?.windowId)
+        ? await captureGenerationScreenshot(activeTab.windowId)
+        : null;
 
     const result = await chrome.runtime.sendMessage({
       type: 'generate-dark-mode',
       tabId: activeTab.id,
-      provider: providerSelector.value,
-      model: modelSelector.value,
+      provider,
+      model,
+      screenshotDataUrl,
     });
 
     if (result?.skipped) {

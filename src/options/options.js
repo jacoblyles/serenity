@@ -173,16 +173,20 @@ function buildProviderCard(provider, apiKey = '') {
     removeProviderCard(card);
   });
 
-  card.querySelector('.reveal-btn').addEventListener('click', (e) => {
-    const input = card.querySelector('.api-key-input');
-    const btn = e.currentTarget;
-    if (input.type === 'password') {
-      input.type = 'text';
-      btn.textContent = 'Hide';
-    } else {
-      input.type = 'password';
-      btn.textContent = 'Show';
-    }
+  card.querySelectorAll('.reveal-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const wrap = e.currentTarget.closest('.input-with-action');
+      const input = wrap?.querySelector('input');
+      if (!input) return;
+
+      if (input.type === 'password') {
+        input.type = 'text';
+        e.currentTarget.textContent = 'Hide';
+      } else {
+        input.type = 'password';
+        e.currentTarget.textContent = 'Show';
+      }
+    });
   });
 
   return card;

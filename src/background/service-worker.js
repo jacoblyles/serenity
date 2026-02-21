@@ -2,7 +2,7 @@
 // Handles messaging between popup/content scripts and LLM providers
 
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
-import { mergeLlmSettings } from '../shared/llm-settings.js';
+import { mergeLlmSettings, PROVIDER_MODELS } from '../shared/llm-settings.js';
 import { log } from '../shared/logger.js';
 import {
   STYLE_STORAGE_KEY,
@@ -14,7 +14,19 @@ import {
 const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
 const MAX_FEEDBACK_IMAGE_NAME_LENGTH = 80;
+const MAX_GENERATION_SCREENSHOT_DATA_URL_LENGTH = 1_200_000;
+const MAX_CONTEXT_DOM_NODES = 260;
+const MAX_CONTEXT_DOM_DEPTH = 5;
+const MAX_CONTEXT_DOM_CHILDREN = 14;
+const MAX_CONTEXT_DOM_NODES_WITH_SCREENSHOT = 140;
+const MAX_CONTEXT_DOM_DEPTH_WITH_SCREENSHOT = 4;
+const MAX_CONTEXT_DOM_CHILDREN_WITH_SCREENSHOT = 10;
 const inFlightAutoGeneration = new Set();
+const KNOWN_MODEL_IDS = new Set(
+  Object.values(PROVIDER_MODELS)
+    .flat()
+    .map((model) => model.id)
+);
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
@@ -175,11 +187,17 @@ async function handleGetPopupState() {
     'feedbackText',
     'feedbackImages',
   ]);
+  const selectedModelRaw = state.selectedModel || 'gpt-5.2';
+  const selectedModel = KNOWN_MODEL_IDS.has(selectedModelRaw) ? selectedModelRaw : 'gpt-5.2';
+
+  if (selectedModel !== selectedModelRaw) {
+    await chrome.storage.local.set({ selectedModel });
+  }
 
   return {
     enabled: Boolean(state.enabled),
     autoMode: Boolean(state.autoMode),
-    selectedModel: state.selectedModel || 'gpt-5.2',
+    selectedModel,
     feedbackText: state.feedbackText || '',
     feedbackImages: sanitizeFeedbackImages(state.feedbackImages),
   };
@@ -194,7 +212,9 @@ async function handleSetPopupState(message) {
     update.autoMode = message.autoMode;
   }
   if (typeof message.selectedModel === 'string') {
-    update.selectedModel = message.selectedModel;
+    update.selectedModel = KNOWN_MODEL_IDS.has(message.selectedModel)
+      ? message.selectedModel
+      : 'gpt-5.2';
   }
   if (typeof message.feedbackText === 'string') {
     update.feedbackText = message.feedbackText.slice(0, 500);
@@ -309,9 +329,59 @@ async function removeCssFromTab(tabId) {
 
 async function sendMessageToTab(tabId, message) {
   try {
-    await chrome.tabs.sendMessage(tabId, message);
+    await sendMessageToTabWithInjection(tabId, message);
   } catch {
     // Ignore tabs without our content script (e.g. chrome:// pages).
+  }
+}
+
+async function sendMessageToTabWithInjection(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!shouldRetryWithContentScriptInjection(error)) {
+      throw error;
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['src/content/content.js'],
+    });
+
+    return chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
+function shouldRetryWithContentScriptInjection(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return (
+    message.includes('Receiving end does not exist') ||
+    message.includes('Could not establish connection')
+  );
+}
+
+async function getContentScriptUnavailableError(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const rawUrl = typeof tab?.url === 'string' ? tab.url : '';
+    if (!rawUrl) {
+      return 'Unable to extract page context from content script';
+    }
+
+    let protocol = '';
+    try {
+      protocol = new URL(rawUrl).protocol;
+    } catch {
+      protocol = '';
+    }
+
+    if (protocol && protocol !== 'http:' && protocol !== 'https:') {
+      return `This page does not allow extension scripting (${protocol.replace(':', '')} pages are restricted)`;
+    }
+
+    return 'Unable to extract page context from content script. Reload the page and try again.';
+  } catch {
+    return 'Unable to extract page context from content script';
   }
 }
 
@@ -374,7 +444,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
 
   // Detect if the page already has dark mode
   try {
-    const detection = await chrome.tabs.sendMessage(tabId, { type: 'detect-dark-mode' });
+    const detection = await sendMessageToTabWithInjection(tabId, { type: 'detect-dark-mode' });
     if (detection?.isDark) {
       log.info('generate', 'Page already has dark mode, skipping generation', { signals: detection.signals });
       return { css: null, skipped: true, reason: 'Page already has a dark mode', signals: detection.signals };
@@ -386,16 +456,19 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
 
   let pageContext;
   try {
-    pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
+    pageContext = await sendMessageToTabWithInjection(tabId, { type: 'extract-dom' });
     log.info('generate', 'Extracted page context', { nodeCount: pageContext?.nodeCount, truncated: pageContext?.truncated, url: pageContext?.url });
   } catch (_error) {
     log.error('generate', 'Failed to extract page context', { tabId });
-    return { css: null, error: 'Unable to extract page context from content script' };
+    return { css: null, error: await getContentScriptUnavailableError(tabId) };
   }
 
   const activePrompts = await getActivePrompts();
   log.info('generate', 'Using prompts', { custom: Boolean(activePrompts.system || activePrompts.user) });
-  const contextJson = JSON.stringify(sanitizePageContext(pageContext));
+  const screenshotDataUrl = sanitizeGenerationScreenshotDataUrl(options.screenshotDataUrl);
+  const contextJson = buildContextJsonForPrompt(pageContext, {
+    withScreenshot: Boolean(screenshotDataUrl),
+  });
   let userContent;
   if (activePrompts.user) {
     userContent = activePrompts.user.includes('{{context}}')
@@ -405,21 +478,33 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     userContent = buildDarkModeUserPrompt(pageContext);
   }
 
+  const userMessageContent = screenshotDataUrl
+    ? [
+        { type: 'text', text: `${userContent}\nAttached screenshot: current viewport render.` },
+        { type: 'image_url', image_url: { url: screenshotDataUrl } },
+      ]
+    : userContent;
+
   const request = {
     provider: typeof options.provider === 'string' ? options.provider : undefined,
     model: typeof options.model === 'string' ? options.model : undefined,
     temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
-    maxTokens: typeof options.maxTokens === 'number' ? options.maxTokens : 1500,
+    maxTokens: typeof options.maxTokens === 'number' ? options.maxTokens : 3200,
     systemPrompt: activePrompts.system || buildDarkModeSystemPrompt(),
     messages: [
       {
         role: 'user',
-        content: userContent,
+        content: userMessageContent,
       },
     ],
   };
 
-  log.info('generate', 'Sending LLM request', { provider: request.provider, model: request.model, messageLength: typeof userContent === 'string' ? userContent.length : 0 });
+  log.info('generate', 'Sending LLM request', {
+    provider: request.provider,
+    model: request.model,
+    messageLength: typeof userContent === 'string' ? userContent.length : 0,
+    screenshotAttached: Boolean(screenshotDataUrl),
+  });
 
   let llmResult;
   try {
@@ -440,7 +525,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
   log.info('generate', 'CSS extracted', { cssLength: css.length });
 
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'apply-css', css });
+    await sendMessageToTabWithInjection(tabId, { type: 'apply-css', css });
     log.info('generate', 'CSS applied to tab', { tabId });
   } catch (_error) {
     log.error('generate', 'Failed to apply CSS to tab', { tabId });
@@ -475,10 +560,10 @@ async function handleRefineDarkMode(message, sender) {
 
   let pageContext;
   try {
-    pageContext = await chrome.tabs.sendMessage(tabId, { type: 'extract-dom' });
+    pageContext = await sendMessageToTabWithInjection(tabId, { type: 'extract-dom' });
   } catch (_error) {
     log.error('refine', 'Failed to extract page context');
-    return { css: null, error: 'Unable to extract page context from content script' };
+    return { css: null, error: await getContentScriptUnavailableError(tabId) };
   }
 
   const currentCss = await resolveCurrentCssForRefinement(message, sender, tabId);
@@ -492,7 +577,7 @@ async function handleRefineDarkMode(message, sender) {
     provider: typeof message.provider === 'string' ? message.provider : undefined,
     model: typeof message.model === 'string' ? message.model : undefined,
     temperature: typeof message.temperature === 'number' ? message.temperature : 0.2,
-    maxTokens: typeof message.maxTokens === 'number' ? message.maxTokens : 1500,
+    maxTokens: typeof message.maxTokens === 'number' ? message.maxTokens : 3200,
     systemPrompt: buildRefineSystemPrompt(),
     messages: [
       {
@@ -526,7 +611,7 @@ async function handleRefineDarkMode(message, sender) {
   }
 
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'apply-css', css });
+    await sendMessageToTabWithInjection(tabId, { type: 'apply-css', css });
     log.info('refine', 'Refined CSS applied', { tabId, cssLength: css.length });
   } catch (_error) {
     log.error('refine', 'Failed to apply refined CSS');
@@ -587,6 +672,9 @@ function buildDarkModeSystemPrompt() {
     'Generate dark mode CSS for the provided webpage context.',
     'Return CSS only. Do not include Markdown or explanations.',
     'Preserve readability and contrast while minimizing layout changes.',
+    'Style all major surfaces and states: page background, content cards, sidebars, forms, inputs, textareas, preview panes, quotes, code blocks, tables, links, buttons, and borders.',
+    'Preserve structure and spacing. Do not hide content, overlay blocks, or change element sizes.',
+    'Maintain accessible contrast across base text, muted text, and interactive states.',
     'Prefer scoped overrides on common selectors and avoid !important unless necessary.',
   ].join(' ');
 }
@@ -597,13 +685,17 @@ function buildRefineSystemPrompt() {
     'Refine an existing dark mode stylesheet using explicit user feedback.',
     'Return CSS only. Do not include Markdown or explanations.',
     'Preserve the current layout and only adjust styles needed to satisfy feedback.',
+    'Ensure the result styles all major surfaces and states, including sidebars, editor areas, preview boxes, links, and form controls.',
     'Keep accessibility and contrast strong across text, controls, and interactive states.',
   ].join(' ');
 }
 
 function buildDarkModeUserPrompt(pageContext) {
   const safeContext = sanitizePageContext(pageContext);
-  const contextJson = JSON.stringify(safeContext);
+  const contextJson = buildContextJsonForPrompt(safeContext, { withScreenshot: false });
+  const truncatedHint = safeContext.truncated
+    ? 'Context is truncated. Prioritize robust selectors that cover main content, sidebars, discussion threads, editor textareas, preview regions, and quoted blocks.'
+    : 'Context is complete enough to target specific components and states.';
 
   return [
     'Create CSS that applies a visually pleasing dark theme to this page context.',
@@ -612,7 +704,11 @@ function buildDarkModeUserPrompt(pageContext) {
     '- Use light text with sufficient contrast.',
     '- Keep links/buttons distinguishable and accessible.',
     '- Handle forms, tables, cards, and code blocks when present.',
+    '- Explicitly style right/left sidebars, composer/editor areas, and preview containers if present.',
+    '- Include :hover, :focus, :active, :visited, and placeholder states where relevant.',
     '- Do not hide content or change spacing/layout dramatically.',
+    'Context guidance:',
+    `- ${truncatedHint}`,
     'Page context JSON:',
     contextJson,
   ].join('\n');
@@ -620,15 +716,21 @@ function buildDarkModeUserPrompt(pageContext) {
 
 function buildRefineUserPrompt({ pageContext, currentCss, feedback, feedbackImages }) {
   const safeContext = sanitizePageContext(pageContext);
-  const contextJson = JSON.stringify(safeContext);
+  const contextJson = buildContextJsonForPrompt(safeContext, { withScreenshot: false });
   const safeFeedback = feedback || '(no text feedback provided; use screenshots to infer issues)';
+  const truncatedHint = safeContext.truncated
+    ? 'Page context is truncated. Use resilient selectors and ensure full-surface coverage for sidebar/editor/preview/thread areas.'
+    : 'Use the page context details to target specific problem components.';
   const textPrompt = [
     'Refine the existing dark mode CSS based on user feedback.',
     'Requirements:',
     '- Keep improvements already present unless feedback requests changes.',
     '- Preserve structure, spacing, and layout behavior.',
     '- Maintain accessible contrast and visible interactive states.',
+    '- Ensure sidebars, comments, editor textareas, preview containers, and quotes are all covered.',
     '- Return a full replacement CSS stylesheet.',
+    'Context guidance:',
+    `- ${truncatedHint}`,
     'User feedback:',
     safeFeedback,
     'Current CSS:',
@@ -676,7 +778,7 @@ async function resolveCurrentCssForRefinement(message, sender, tabId) {
   }
 
   try {
-    const applied = await chrome.tabs.sendMessage(tabId, { type: 'get-applied-css' });
+    const applied = await sendMessageToTabWithInjection(tabId, { type: 'get-applied-css' });
     if (typeof applied?.css === 'string' && applied.css.trim()) {
       return applied.css.trim();
     }
@@ -734,6 +836,110 @@ function sanitizeFeedbackImages(images) {
   return sanitized;
 }
 
+function sanitizeGenerationScreenshotDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') return null;
+  if (!dataUrl.startsWith('data:image/')) return null;
+  if (dataUrl.length > MAX_GENERATION_SCREENSHOT_DATA_URL_LENGTH) return null;
+  return dataUrl;
+}
+
+function buildContextJsonForPrompt(pageContext, { withScreenshot = false } = {}) {
+  const safeContext = sanitizePageContext(pageContext);
+  const compactDom = compactDomNode(safeContext.dom, {
+    includeStyles: !withScreenshot,
+    maxNodes: withScreenshot ? MAX_CONTEXT_DOM_NODES_WITH_SCREENSHOT : MAX_CONTEXT_DOM_NODES,
+    maxDepth: withScreenshot ? MAX_CONTEXT_DOM_DEPTH_WITH_SCREENSHOT : MAX_CONTEXT_DOM_DEPTH,
+    maxChildren: withScreenshot
+      ? MAX_CONTEXT_DOM_CHILDREN_WITH_SCREENSHOT
+      : MAX_CONTEXT_DOM_CHILDREN,
+  });
+
+  return JSON.stringify({
+    ...safeContext,
+    dom: compactDom,
+  });
+}
+
+function compactDomNode(root, config) {
+  if (!root || typeof root !== 'object') return null;
+
+  const state = { count: 0 };
+  const allowedStyleKeys = config.includeStyles
+    ? new Set([
+        'display',
+        'position',
+        'color',
+        'backgroundColor',
+        'fontSize',
+        'fontWeight',
+        'borderTopColor',
+        'borderTopWidth',
+        'outlineColor',
+      ])
+    : null;
+
+  function visit(node, depth) {
+    if (!node || typeof node !== 'object') return null;
+    if (state.count >= config.maxNodes) return null;
+    if (depth > config.maxDepth) return null;
+    state.count += 1;
+
+    const compact = {
+      tag: typeof node.tag === 'string' ? node.tag : '',
+      id: typeof node.id === 'string' ? node.id : null,
+      classList: Array.isArray(node.classList) ? node.classList.slice(0, 6) : [],
+      text: typeof node.text === 'string' ? node.text.slice(0, 120) : null,
+      formControl: Boolean(node.formControl),
+      attributes: compactAttributes(node.attributes),
+      rect: compactRect(node.rect),
+      children: [],
+    };
+
+    if (allowedStyleKeys && node.styles && typeof node.styles === 'object') {
+      const styles = {};
+      for (const key of allowedStyleKeys) {
+        if (typeof node.styles[key] === 'string' && node.styles[key]) {
+          styles[key] = node.styles[key];
+        }
+      }
+      compact.styles = styles;
+    }
+
+    const children = Array.isArray(node.children) ? node.children : [];
+    for (const child of children.slice(0, config.maxChildren)) {
+      const compactChild = visit(child, depth + 1);
+      if (compactChild) compact.children.push(compactChild);
+      if (state.count >= config.maxNodes) break;
+    }
+
+    return compact;
+  }
+
+  return visit(root, 0);
+}
+
+function compactAttributes(attributes) {
+  if (!attributes || typeof attributes !== 'object') return {};
+  const keys = ['role', 'ariaLabel', 'type', 'placeholder', 'href', 'src', 'alt', 'title'];
+  const compact = {};
+  for (const key of keys) {
+    if (typeof attributes[key] === 'string' && attributes[key]) {
+      compact[key] = attributes[key].slice(0, 120);
+    }
+  }
+  return compact;
+}
+
+function compactRect(rect) {
+  if (!rect || typeof rect !== 'object') return null;
+  const out = {};
+  if (Number.isFinite(rect.x)) out.x = rect.x;
+  if (Number.isFinite(rect.y)) out.y = rect.y;
+  if (Number.isFinite(rect.width)) out.width = rect.width;
+  if (Number.isFinite(rect.height)) out.height = rect.height;
+  return out;
+}
+
 function sanitizePageContext(pageContext) {
   if (!isObject(pageContext)) {
     return {
@@ -749,6 +955,7 @@ function sanitizePageContext(pageContext) {
     url: typeof pageContext.url === 'string' ? pageContext.url : '',
     hostname: typeof pageContext.hostname === 'string' ? pageContext.hostname : '',
     title: typeof pageContext.title === 'string' ? pageContext.title : '',
+    rootTag: typeof pageContext.rootTag === 'string' ? pageContext.rootTag : '',
     viewport: isObject(pageContext.viewport)
       ? {
           width: Number.isFinite(pageContext.viewport.width) ? pageContext.viewport.width : null,

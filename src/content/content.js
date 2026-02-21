@@ -2,11 +2,21 @@
 // Injected into all pages; handles style extraction and CSS injection
 
 const STYLE_ELEMENT_ID = 'serenity-styles';
-const MAX_NODES = 500;
-const MAX_DEPTH = 6;
-const MAX_CHILDREN_PER_NODE = 25;
-const MAX_TEXT_LENGTH = 120;
-const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+const MAX_NODES = 900;
+const MAX_DEPTH = 8;
+const MAX_CHILDREN_PER_NODE = 35;
+const MAX_TEXT_LENGTH = 180;
+const SKIP_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'NOSCRIPT',
+  'TEMPLATE',
+  'HEAD',
+  'META',
+  'LINK',
+  'TITLE',
+  'BASE',
+]);
 const FORM_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'BUTTON']);
 const STYLE_PROPERTIES = [
   'display',
@@ -29,6 +39,12 @@ const STYLE_PROPERTIES = [
   'borderRightWidth',
   'borderBottomWidth',
   'borderLeftWidth',
+  'boxShadow',
+  'outlineColor',
+  'outlineStyle',
+  'outlineWidth',
+  'caretColor',
+  'textDecorationColor',
 ];
 
 function injectCSS(css) {
@@ -75,6 +91,7 @@ function extractDOM() {
       width: window.innerWidth,
       height: window.innerHeight,
     },
+    rootTag: '',
     dom: null,
     truncated: false,
     nodeCount: 0,
@@ -195,7 +212,9 @@ function extractDOM() {
     return node;
   }
 
-  result.dom = extractElement(document.documentElement, 0);
+  const rootEl = document.body || document.documentElement;
+  result.rootTag = rootEl.tagName.toLowerCase();
+  result.dom = extractElement(rootEl, 0);
   result.nodeCount = nodeCount;
 
   return {
