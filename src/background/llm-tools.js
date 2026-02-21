@@ -129,11 +129,48 @@ export function buildOpenAiToolResult(toolCallId, result) {
   }
 }
 
+export function buildOpenAiToolResultWithImage(toolCallId, result, imageDataUrl) {
+  return {
+    role: 'tool',
+    tool_call_id: toolCallId,
+    content: [
+      { type: 'text', text: JSON.stringify(result) },
+      { type: 'image_url', image_url: { url: imageDataUrl } },
+    ],
+  }
+}
+
 export function buildAnthropicToolResult(toolCallId, result) {
   return {
     type: 'tool_result',
     tool_use_id: toolCallId,
     content: JSON.stringify(result),
+  }
+}
+
+export function buildAnthropicToolResultWithImage(toolCallId, result, imageDataUrl) {
+  const match = typeof imageDataUrl === 'string'
+    ? imageDataUrl.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/)
+    : null
+
+  if (!match) {
+    return buildAnthropicToolResult(toolCallId, result)
+  }
+
+  return {
+    type: 'tool_result',
+    tool_use_id: toolCallId,
+    content: [
+      { type: 'text', text: JSON.stringify(result) },
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: match[1],
+          data: match[2],
+        },
+      },
+    ],
   }
 }
 
@@ -146,22 +183,37 @@ export function buildGoogleToolResult(name, result) {
   }
 }
 
-export function buildToolResultMessage(provider, toolCallId, toolName, result) {
+export function buildToolResultMessage(provider, toolCallId, toolName, result, imageDataUrl = null) {
   if (provider === 'anthropic') {
+    const toolResultPart = imageDataUrl
+      ? buildAnthropicToolResultWithImage(toolCallId, result, imageDataUrl)
+      : buildAnthropicToolResult(toolCallId, result)
+
     return {
       role: 'user',
-      content: [buildAnthropicToolResult(toolCallId, result)],
+      content: [toolResultPart],
     }
   }
 
   if (provider === 'google') {
+    const content = [buildGoogleToolResult(toolName, result)]
+    if (imageDataUrl) {
+      content.push(
+        { type: 'text', text: JSON.stringify(result) },
+        { type: 'image_url', image_url: { url: imageDataUrl } },
+      )
+    }
+
     return {
       role: 'user',
-      content: [buildGoogleToolResult(toolName, result)],
+      content,
     }
   }
 
   if (provider === 'openai' || provider === 'xai' || provider === 'custom') {
+    if (imageDataUrl) {
+      return buildOpenAiToolResultWithImage(toolCallId, result, imageDataUrl)
+    }
     return buildOpenAiToolResult(toolCallId, result)
   }
 

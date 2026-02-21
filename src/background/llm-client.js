@@ -44,12 +44,15 @@ function normalizeMessageContent(content) {
     if (
       part.type === 'tool_result' &&
       typeof part.tool_use_id === 'string' &&
-      typeof part.content === 'string'
+      (typeof part.content === 'string' || Array.isArray(part.content))
     ) {
       normalizedParts.push({
         type: 'tool_result',
         tool_use_id: part.tool_use_id,
-        content: part.content,
+        content:
+          typeof part.content === 'string'
+            ? part.content
+            : normalizeAnthropicToolResultParts(part.content),
       });
       continue;
     }
@@ -385,17 +388,86 @@ function convertToAnthropicContent(content) {
     if (
       part.type === 'tool_result' &&
       typeof part.tool_use_id === 'string' &&
-      typeof part.content === 'string'
+      (typeof part.content === 'string' || Array.isArray(part.content))
     ) {
       parts.push({
         type: 'tool_result',
         tool_use_id: part.tool_use_id,
-        content: part.content,
+        content:
+          typeof part.content === 'string'
+            ? part.content
+            : convertToAnthropicToolResultContent(part.content),
       });
     }
   }
 
   return parts;
+}
+
+function normalizeAnthropicToolResultParts(contentParts) {
+  const normalized = [];
+
+  for (const part of contentParts) {
+    if (!part || typeof part !== 'object') continue;
+
+    if (part.type === 'text' && typeof part.text === 'string' && part.text) {
+      normalized.push({ type: 'text', text: part.text });
+      continue;
+    }
+
+    if (
+      part.type === 'image' &&
+      part.source &&
+      typeof part.source === 'object' &&
+      part.source.type === 'base64' &&
+      typeof part.source.media_type === 'string' &&
+      typeof part.source.data === 'string'
+    ) {
+      normalized.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: part.source.media_type,
+          data: part.source.data,
+        },
+      });
+    }
+  }
+
+  return normalized;
+}
+
+function convertToAnthropicToolResultContent(contentParts) {
+  const converted = [];
+
+  for (const part of contentParts) {
+    if (!part || typeof part !== 'object') continue;
+
+    if (part.type === 'text' && typeof part.text === 'string') {
+      converted.push({ type: 'text', text: part.text });
+      continue;
+    }
+
+    if (
+      part.type === 'image' &&
+      part.source &&
+      typeof part.source === 'object' &&
+      part.source.type === 'base64' &&
+      typeof part.source.media_type === 'string' &&
+      typeof part.source.data === 'string'
+    ) {
+      converted.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: part.source.media_type,
+          data: part.source.data,
+        },
+      });
+    }
+  }
+
+  return converted;
 }
 
 function convertToGoogleParts(content) {

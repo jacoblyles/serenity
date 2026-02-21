@@ -190,12 +190,18 @@ export async function runAgentLoop(tabId, options = {}) {
           },
         });
 
+        const imageDataUrl = getToolResultScreenshot(toolCall.name, toolResult);
+        const sanitizedToolResult = imageDataUrl
+          ? removeScreenshotFromToolResult(toolResult)
+          : toolResult;
+
         messages.push(
           buildToolResultMessage(
             llmResult.provider,
             toolCall.id,
             toolCall.name,
-            toolResult
+            sanitizedToolResult,
+            imageDataUrl
           )
         );
       }
@@ -433,6 +439,10 @@ function collectScreenshotHoldersFromMessage(message, holders) {
         );
       }
 
+      if (part.type === 'tool_result' && Array.isArray(part.content)) {
+        collectScreenshotHoldersFromContentParts(part.content, holders);
+      }
+
       if (isObject(part.functionResponse)) {
         collectScreenshotHoldersFromObject(part.functionResponse.response, holders);
       }
@@ -447,6 +457,40 @@ function collectScreenshotHoldersFromMessage(message, holders) {
       },
       holders
     );
+  }
+}
+
+function collectScreenshotHoldersFromContentParts(parts, holders) {
+  for (const part of parts) {
+    if (!isObject(part)) continue;
+
+    if (
+      part.type === 'image'
+      && isObject(part.source)
+      && part.source.type === 'base64'
+      && typeof part.source.data === 'string'
+      && part.source.data
+    ) {
+      holders.push({
+        setPruned: () => {
+          part.source.data = '[screenshot pruned]';
+        },
+      });
+      continue;
+    }
+
+    if (
+      part.type === 'image_url'
+      && isObject(part.image_url)
+      && typeof part.image_url.url === 'string'
+      && part.image_url.url.startsWith('data:image/')
+    ) {
+      holders.push({
+        setPruned: () => {
+          part.image_url.url = '[screenshot pruned]';
+        },
+      });
+    }
   }
 }
 
@@ -518,6 +562,26 @@ function extractCssFromModelText(text) {
 
 function looksLikeCss(text) {
   return /[.#:]?[a-zA-Z][a-zA-Z0-9_:\-#.*\s>,+~[\]="'()]*\{[^{}]*\}/.test(text);
+}
+
+function getToolResultScreenshot(toolName, result) {
+  if (toolName !== 'apply_css' && toolName !== 'scroll_and_capture') {
+    return null;
+  }
+
+  const screenshot = isObject(result) ? result.screenshot : null;
+  if (typeof screenshot !== 'string' || !screenshot.startsWith('data:image/')) {
+    return null;
+  }
+
+  return screenshot;
+}
+
+function removeScreenshotFromToolResult(result) {
+  if (!isObject(result)) return result;
+  const cloned = { ...result };
+  delete cloned.screenshot;
+  return cloned;
 }
 
 function isObject(value) {
