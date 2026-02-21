@@ -28,12 +28,12 @@ const MAX_CONTEXT_DOM_CHILDREN = 14;
 const MAX_CONTEXT_DOM_NODES_WITH_SCREENSHOT = 140;
 const MAX_CONTEXT_DOM_DEPTH_WITH_SCREENSHOT = 4;
 const MAX_CONTEXT_DOM_CHILDREN_WITH_SCREENSHOT = 10;
-const MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP = 110;
-const MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP = 3;
-const MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP = 8;
-const MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP_AND_SCREENSHOT = 70;
-const MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP_AND_SCREENSHOT = 2;
-const MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP_AND_SCREENSHOT = 6;
+const MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP = 180;
+const MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP = 5;
+const MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP = 10;
+const MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP_AND_SCREENSHOT = 120;
+const MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP_AND_SCREENSHOT = 4;
+const MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP_AND_SCREENSHOT = 8;
 const MAX_CONTEXT_COLOR_MAP_ENTRIES = 200;
 const MAX_CONTEXT_COLOR_MAP_SELECTOR_LENGTH = 180;
 const MAX_CONTEXT_COLOR_LIST = 120;
@@ -1026,34 +1026,75 @@ async function getActivePrompts() {
 
 function buildDarkModeSystemPrompt() {
   return [
-    'You are a CSS-only assistant.',
-    'Generate dark mode CSS for the provided webpage context.',
-    'Return CSS only. Do not include Markdown or explanations.',
-    'Preserve readability and contrast while minimizing layout changes.',
-    'Style all major surfaces and states: page background, content cards, sidebars, forms, inputs, textareas, preview panes, quotes, code blocks, tables, links, buttons, and borders.',
-    'Preserve structure and spacing. Do not hide content, overlay blocks, or change element sizes.',
-    'Maintain accessible contrast across base text, muted text, and interactive states.',
-    'Prefer scoped overrides on common selectors and avoid !important unless necessary.',
-  ].join(' ');
+    'You are a CSS dark mode specialist.',
+    'Generate a complete dark mode CSS stylesheet for the provided webpage.',
+    'Return ONLY valid CSS. No markdown fences, no explanations, no comments.',
+    '',
+    'Color palette targets:',
+    '- Page background: #1a1a2e or similar deep blue-gray (not pure black)',
+    '- Surface/card backgrounds: #16213e or #1e1e2e (slightly lighter than page)',
+    '- Primary text: #e0e0e0 (not pure white, reduces glare)',
+    '- Secondary/muted text: #a0a0a0',
+    '- Links: #6db3f2 (accessible blue)',
+    '- Borders: #2a2a3e or rgba(255,255,255,0.1)',
+    '- Accent colors: desaturate by ~30% and increase lightness for dark backgrounds',
+    '',
+    'Contrast requirements (WCAG AA):',
+    '- Normal text on backgrounds: minimum 4.5:1 ratio',
+    '- Large text (18px+ or 14px+ bold): minimum 3:1 ratio',
+    '- Interactive elements: must be distinguishable from surrounding content',
+    '',
+    'Selector strategy:',
+    '- Use !important on color properties (background, color, border-color, box-shadow, outline-color)',
+    '- Do NOT use !important on layout properties (display, position, margin, padding, width, height)',
+    '- Target broad selectors first (body, main, header, nav, aside, footer, section, article, td, th)',
+    '- Then target specific component patterns from the color map',
+    '- Include states: :hover, :focus, :active, :visited, ::placeholder',
+    '',
+    'Rules:',
+    '- Set color-scheme: dark on :root',
+    '- Preserve images, videos, iframes — do not invert or filter them',
+    '- Handle form elements: input, textarea, select, button',
+    '- Preserve visual hierarchy between page bg, card bg, and elevated surfaces',
+    '- Do NOT hide content, change layout, alter spacing, or modify font sizes',
+  ].join('\n');
 }
 
 function buildGenerationSystemPrompt(activeSystemPrompt, hasCustomProperties) {
-  const customPropertyGuidance = 'This site uses CSS custom properties for theming. Prefer overriding these variables on :root rather than targeting individual elements.';
   const basePrompt = activeSystemPrompt || buildDarkModeSystemPrompt();
   if (!hasCustomProperties) return basePrompt;
-  if (basePrompt.includes(customPropertyGuidance)) return basePrompt;
-  return `${basePrompt} ${customPropertyGuidance}`;
+
+  const strategy = [
+    '',
+    'CUSTOM PROPERTY STRATEGY (this site uses CSS variables for theming):',
+    '1. Override ALL color-related custom properties on :root FIRST',
+    '2. For --*background*/*bg*/*surface* variables: use dark values (#1a1a2e, #1e1e2e, #252540)',
+    '3. For --*text*/*foreground*/*fg* variables: use light values (#e0e0e0, #a0a0a0)',
+    '4. For --*border*/*divider* variables: use subtle values (#2a2a3e, rgba(255,255,255,0.1))',
+    '5. For --*accent*/*primary*/*brand* variables: desaturate and lighten the current value',
+    '6. Add element-specific overrides ONLY for elements not covered by variable changes',
+    '7. The :root override block should come FIRST in your CSS output',
+    '8. Use !important on :root variable overrides to ensure precedence over media queries',
+  ].join('\n');
+
+  return `${basePrompt}\n${strategy}`;
 }
 
 function buildRefineSystemPrompt() {
   return [
-    'You are a CSS-only assistant.',
-    'Refine an existing dark mode stylesheet using explicit user feedback.',
-    'Return CSS only. Do not include Markdown or explanations.',
-    'Preserve the current layout and only adjust styles needed to satisfy feedback.',
-    'Ensure the result styles all major surfaces and states, including sidebars, editor areas, preview boxes, links, and form controls.',
-    'Keep accessibility and contrast strong across text, controls, and interactive states.',
-  ].join(' ');
+    'You are a CSS dark mode specialist refining an existing dark stylesheet.',
+    'Return ONLY valid CSS. No markdown fences, no explanations.',
+    'Output a COMPLETE replacement stylesheet (not a diff or patch).',
+    '',
+    'Refinement priorities:',
+    '- Fix any elements that are still light-colored (white/light backgrounds)',
+    '- Fix any text that has poor contrast against its background (below 4.5:1)',
+    '- Fix any accent colors that are too bright or saturated for dark backgrounds',
+    '- Ensure form elements (inputs, textareas, selects, buttons) are dark-themed',
+    '- Ensure all interactive states (:hover, :focus, :active) are visible',
+    '- Preserve all existing fixes that work well',
+    '- Do NOT change layout, spacing, or font properties',
+  ].join('\n');
 }
 
 function buildDarkModeUserPrompt(
@@ -1061,42 +1102,75 @@ function buildDarkModeUserPrompt(
   { extractedNativeDarkCss = '', extractedNativeDarkCssBytes = 0 } = {}
 ) {
   const safeContext = sanitizePageContext(pageContext);
+  const sections = [];
+
+  sections.push(`Page: ${safeContext.url || 'unknown'}`);
+  sections.push(`Title: ${safeContext.title || 'unknown'}`);
+
+  if (safeContext.layoutSummary) {
+    const ls = safeContext.layoutSummary;
+    sections.push(`Layout type: ${ls.layoutType} (${ls.totalElements} elements, nesting depth ${ls.nestingDepth})`);
+    if (ls.regions.length) sections.push(`Regions: ${ls.regions.join(', ')}`);
+    if (ls.hasNestedComments) sections.push('Has nested comment threads — ensure ALL nesting levels get dark backgrounds');
+    if (ls.contentSelectors?.length) sections.push(`Key repeating selectors: ${ls.contentSelectors.join(', ')}`);
+  }
+
+  if (safeContext.customProperties) {
+    const cp = safeContext.customProperties;
+    sections.push('', '=== CSS CUSTOM PROPERTIES (override these on :root FIRST) ===');
+    if (cp.grouped.backgrounds.length) {
+      sections.push(`Background vars (→ dark values): ${cp.grouped.backgrounds.slice(0, 15).join(', ')}`);
+    }
+    if (cp.grouped.text.length) {
+      sections.push(`Text vars (→ light values): ${cp.grouped.text.slice(0, 15).join(', ')}`);
+    }
+    if (cp.grouped.borders.length) {
+      sections.push(`Border vars (→ subtle dark): ${cp.grouped.borders.slice(0, 10).join(', ')}`);
+    }
+    if (cp.grouped.accents.length) {
+      sections.push(`Accent vars (→ desaturate+lighten): ${cp.grouped.accents.slice(0, 10).join(', ')}`);
+    }
+    const propEntries = Object.entries(cp.properties).slice(0, 50);
+    if (propEntries.length) {
+      sections.push('Current values:');
+      for (const [name, value] of propEntries) {
+        sections.push(`  ${name}: ${value}`);
+      }
+    }
+  }
+
+  if (Array.isArray(safeContext.colorMap) && safeContext.colorMap.length > 0) {
+    sections.push('', '=== COLOR MAP (current colors by selector, grouped by role) ===');
+    const byRole = {};
+    for (const entry of safeContext.colorMap) {
+      const role = entry.role || 'content';
+      if (!byRole[role]) byRole[role] = [];
+      byRole[role].push(entry);
+    }
+    for (const [role, entries] of Object.entries(byRole)) {
+      sections.push(`[${role}]`);
+      for (const entry of entries.slice(0, 30)) {
+        const parts = [entry.selector];
+        if (entry.bg) parts.push(`bg:${entry.bg}`);
+        if (entry.color) parts.push(`text:${entry.color}`);
+        if (entry.contrast) parts.push(`contrast:${entry.contrast}`);
+        if (entry.isLight) parts.push('NEEDS_DARKENING');
+        sections.push(`  ${parts.join(' | ')}`);
+      }
+    }
+  }
+
   const contextJson = buildContextJsonForPrompt(safeContext, { withScreenshot: false });
+  sections.push('', '=== PAGE STRUCTURE (compact DOM) ===', contextJson);
+
   const hasPartialNativeDarkCss =
     typeof extractedNativeDarkCss === 'string' &&
     extractedNativeDarkCssBytes > 0 &&
     extractedNativeDarkCssBytes < NATIVE_DARK_MODE_DIRECT_APPLY_MIN_BYTES;
-  const truncatedHint = safeContext.truncated
-    ? 'Context is truncated. Prioritize robust selectors that cover main content, sidebars, discussion threads, editor textareas, preview regions, and quoted blocks.'
-    : 'Context is complete enough to target specific components and states.';
-  const colorMapHint = Array.isArray(safeContext.colorMap) && safeContext.colorMap.length > 0
-    ? `Color map includes ${safeContext.colorMap.length} grouped selector profiles. Use colorMap as primary evidence for recoloring decisions.`
-    : 'Color map is unavailable; rely on compact DOM and component targeting.';
-
-  const sections = [
-    'Create CSS that applies a visually pleasing dark theme to this page context.',
-    'Goals:',
-    '- Darken page backgrounds while preserving hierarchy.',
-    '- Use light text with sufficient contrast.',
-    '- Keep links/buttons distinguishable and accessible.',
-    '- Handle forms, tables, cards, and code blocks when present.',
-    '- Explicitly style right/left sidebars, composer/editor areas, and preview containers if present.',
-    '- Include :hover, :focus, :active, :visited, and placeholder states where relevant.',
-    '- Do not hide content or change spacing/layout dramatically.',
-    'Context guidance:',
-    `- ${colorMapHint}`,
-    `- ${truncatedHint}`,
-  ];
-
   if (hasPartialNativeDarkCss) {
-    sections.push(
-      '- The site already includes partial native dark mode rules via prefers-color-scheme. Reuse and extend these patterns instead of replacing them wholesale.',
-      `Extracted native dark CSS (${extractedNativeDarkCssBytes} bytes):`,
-      extractedNativeDarkCss
-    );
+    sections.push('', '=== EXISTING PARTIAL DARK CSS (extend, do not replace) ===', extractedNativeDarkCss);
   }
 
-  sections.push('Page context JSON:', contextJson);
   return sections.join('\n');
 }
 
@@ -1260,16 +1334,24 @@ function buildContextJsonForPrompt(pageContext, { withScreenshot = false } = {})
     maxChildren,
   });
 
-  return JSON.stringify({
-    ...safeContext,
+  const contextForJson = {
+    url: safeContext.url,
+    hostname: safeContext.hostname,
+    title: safeContext.title,
+    viewport: safeContext.viewport,
+    nodeCount: safeContext.nodeCount,
+    truncated: safeContext.truncated,
     dom: compactDom,
-  });
+  };
+
+  return JSON.stringify(contextForJson);
 }
 
 async function extractPageContext(tabId) {
-  const [domResult, colorMapResult] = await Promise.allSettled([
+  const [domResult, colorMapResult, layoutResult] = await Promise.allSettled([
     sendMessageToTabWithInjection(tabId, { type: 'extract-dom' }),
     sendMessageToTabWithInjection(tabId, { type: 'extract-color-map' }),
+    sendMessageToTabWithInjection(tabId, { type: 'extract-layout-summary' }),
   ]);
 
   if (domResult.status !== 'fulfilled' && colorMapResult.status !== 'fulfilled') {
@@ -1281,8 +1363,27 @@ async function extractPageContext(tabId) {
     context.colorMap = colorMapResult.value.colorMap;
     context.uniqueColors = colorMapResult.value.uniqueColors;
   }
+  if (layoutResult.status === 'fulfilled' && isObject(layoutResult.value)) {
+    context.layoutSummary = layoutResult.value;
+  }
 
   return context;
+}
+
+function selectChildren(children, maxChildren) {
+  if (children.length <= maxChildren) return children;
+  const half = Math.floor(maxChildren / 2);
+  const front = children.slice(0, half);
+  const rest = children.slice(half);
+  const stride = Math.max(1, Math.floor(rest.length / (maxChildren - half)));
+  const sampled = [];
+  for (let i = 0; i < rest.length && sampled.length < maxChildren - half; i += stride) {
+    sampled.push(rest[i]);
+  }
+  if (sampled.length < maxChildren - half && rest.length > 0) {
+    sampled.push(rest[rest.length - 1]);
+  }
+  return [...front, ...sampled];
 }
 
 function compactDomNode(root, config) {
@@ -1331,7 +1432,8 @@ function compactDomNode(root, config) {
     }
 
     const children = Array.isArray(node.children) ? node.children : [];
-    for (const child of children.slice(0, config.maxChildren)) {
+    const selected = selectChildren(children, config.maxChildren);
+    for (const child of selected) {
       const compactChild = visit(child, depth + 1);
       if (compactChild) compact.children.push(compactChild);
       if (state.count >= config.maxNodes) break;
@@ -1399,6 +1501,7 @@ function sanitizePageContext(pageContext) {
     customProperties: sanitizeCustomPropertiesContext(pageContext.customProperties),
     colorMap: sanitizeColorMap(pageContext.colorMap),
     uniqueColors: sanitizeUniqueColors(pageContext.uniqueColors),
+    layoutSummary: sanitizeLayoutSummary(pageContext.layoutSummary),
   };
 }
 
@@ -1438,6 +1541,22 @@ function sanitizeCustomPropertiesContext(customProperties) {
   };
 }
 
+function sanitizeLayoutSummary(summary) {
+  if (!isObject(summary)) return null;
+  const validTypes = ['forum', 'article', 'dashboard', 'generic'];
+  return {
+    layoutType: validTypes.includes(summary.layoutType) ? summary.layoutType : 'generic',
+    regions: Array.isArray(summary.regions) ? summary.regions.filter((r) => typeof r === 'string').slice(0, 10) : [],
+    nestingDepth: Number.isFinite(summary.nestingDepth) ? Math.min(summary.nestingDepth, 20) : 0,
+    hasNestedComments: Boolean(summary.hasNestedComments),
+    hasSidebar: Boolean(summary.hasSidebar),
+    hasCodeBlocks: Boolean(summary.hasCodeBlocks),
+    hasForms: Boolean(summary.hasForms),
+    contentSelectors: Array.isArray(summary.contentSelectors) ? summary.contentSelectors.filter((s) => typeof s === 'string').slice(0, 5) : [],
+    totalElements: Number.isFinite(summary.totalElements) ? summary.totalElements : 0,
+  };
+}
+
 function sanitizeColorMap(colorMap) {
   if (!Array.isArray(colorMap)) return [];
 
@@ -1454,6 +1573,10 @@ function sanitizeColorMapEntry(entry) {
   const out = {
     selector: entry.selector.slice(0, MAX_CONTEXT_COLOR_MAP_SELECTOR_LENGTH),
   };
+
+  if (typeof entry.role === 'string' && entry.role) out.role = entry.role;
+  if (typeof entry.contrast === 'number' && Number.isFinite(entry.contrast)) out.contrast = entry.contrast;
+  if (typeof entry.isLight === 'boolean') out.isLight = entry.isLight;
 
   const stringKeys = ['bg', 'color', 'fill', 'stroke'];
   for (const key of stringKeys) {
@@ -1495,13 +1618,28 @@ function sanitizeUniqueColors(uniqueColors) {
 
 function sanitizeUniqueColorList(values) {
   if (!Array.isArray(values)) return [];
-  const deduped = new Set();
+  const result = [];
+  const seen = new Set();
   for (const value of values) {
-    if (typeof value !== 'string' || !value) continue;
-    deduped.add(value.slice(0, 40));
-    if (deduped.size >= MAX_CONTEXT_COLOR_LIST) break;
+    if (isObject(value) && typeof value.color === 'string' && value.color) {
+      const color = value.color.slice(0, 40);
+      if (seen.has(color)) continue;
+      seen.add(color);
+      result.push({
+        color,
+        luminance: typeof value.luminance === 'number' ? value.luminance : null,
+        isLight: typeof value.isLight === 'boolean' ? value.isLight : null,
+        count: typeof value.count === 'number' ? value.count : 0,
+      });
+    } else if (typeof value === 'string' && value) {
+      const color = value.slice(0, 40);
+      if (seen.has(color)) continue;
+      seen.add(color);
+      result.push({ color });
+    }
+    if (result.length >= MAX_CONTEXT_COLOR_LIST) break;
   }
-  return Array.from(deduped);
+  return result;
 }
 
 function extractCssFromModelText(text) {

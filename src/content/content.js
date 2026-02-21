@@ -83,6 +83,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'extract-color-map': () => extractColorMap(),
     'detect-dark-mode': () => detectExistingDarkMode(),
     'extract-dark-mode-rules': () => ({ css: extractPrefersDarkModeCss() }),
+    'extract-layout-summary': () => extractLayoutSummary(),
   };
 
   const handler = handlers[message.type];
@@ -633,11 +634,15 @@ function extractColorMap() {
       if (existing.selectors.size < MAX_COLOR_MAP_SELECTORS_PER_ENTRY) {
         existing.selectors.add(selector);
       }
+      if (!existing.role || existing.role === 'content') {
+        existing.role = classifyElementRole(el);
+      }
     } else {
       profileMap.set(key, {
         profile,
         selectors: new Set([selector]),
         count: 1,
+        role: classifyElementRole(el),
       });
     }
   }
@@ -650,19 +655,33 @@ function extractColorMap() {
   const uniqueText = new Set();
   const uniqueBorders = new Set();
 
+  const bgCounts = new Map();
+  const textCounts = new Map();
+  const borderCounts = new Map();
+
   const colorMap = sortedProfiles.map((entry) => {
     const selectors = Array.from(entry.selectors).sort();
     const item = {
       selector: selectors.join(', '),
+      role: entry.role || 'content',
     };
 
     if (isMeaningfulColor(entry.profile.bg)) {
       item.bg = entry.profile.bg;
       uniqueBackgrounds.add(entry.profile.bg);
+      bgCounts.set(entry.profile.bg, (bgCounts.get(entry.profile.bg) || 0) + entry.count);
+      const bgInfo = parseColorInfo(entry.profile.bg);
+      if (bgInfo) item.isLight = bgInfo.luminance > 0.5;
     }
     if (isMeaningfulColor(entry.profile.color)) {
       item.color = entry.profile.color;
       uniqueText.add(entry.profile.color);
+      textCounts.set(entry.profile.color, (textCounts.get(entry.profile.color) || 0) + entry.count);
+    }
+
+    if (item.bg && item.color) {
+      const cr = contrastRatio(item.color, item.bg);
+      if (cr !== null) item.contrast = cr;
     }
 
     const borderValue = deriveBorderValue(entry.profile);
@@ -670,9 +689,13 @@ function extractColorMap() {
       item.border = borderValue;
       if (typeof borderValue === 'string') {
         uniqueBorders.add(borderValue);
+        borderCounts.set(borderValue, (borderCounts.get(borderValue) || 0) + entry.count);
       } else {
         for (const value of Object.values(borderValue)) {
-          if (isMeaningfulColor(value)) uniqueBorders.add(value);
+          if (isMeaningfulColor(value)) {
+            uniqueBorders.add(value);
+            borderCounts.set(value, (borderCounts.get(value) || 0) + entry.count);
+          }
         }
       }
     }
@@ -687,12 +710,24 @@ function extractColorMap() {
     return item;
   });
 
+  function buildUniqueColorList(colorSet, countMap) {
+    return Array.from(colorSet).map((color) => {
+      const info = parseColorInfo(color);
+      return {
+        color,
+        luminance: info ? Math.round(info.luminance * 100) / 100 : null,
+        isLight: info ? info.luminance > 0.5 : null,
+        count: countMap.get(color) || 0,
+      };
+    }).sort((a, b) => b.count - a.count);
+  }
+
   return {
     colorMap,
     uniqueColors: {
-      backgrounds: Array.from(uniqueBackgrounds).sort(),
-      text: Array.from(uniqueText).sort(),
-      borders: Array.from(uniqueBorders).sort(),
+      backgrounds: buildUniqueColorList(uniqueBackgrounds, bgCounts),
+      text: buildUniqueColorList(uniqueText, textCounts),
+      borders: buildUniqueColorList(uniqueBorders, borderCounts),
     },
   };
 }
@@ -771,6 +806,128 @@ function buildCompactSelector(el) {
   }
 
   return buildShortCssPath(el, safeEscape);
+}
+
+function extractLayoutSummary() {
+  const totalElements = document.querySelectorAll('*').length;
+  const regions = [];
+  const regionSelectors = [
+    ['header', 'header, [role="banner"]'],
+    ['nav', 'nav, [role="navigation"]'],
+    ['main', 'main, [role="main"]'],
+    ['sidebar', 'aside, [role="complementary"], [class*="sidebar"], [class*="side-bar"]'],
+    ['footer', 'footer, [role="contentinfo"]'],
+    ['comments', '[class*="comment"], [class*="reply"], [class*="thread"], [id*="comment"]'],
+  ];
+  for (const [name, selector] of regionSelectors) {
+    try {
+      if (document.querySelector(selector)) regions.push(name);
+    } catch { /* invalid selector */ }
+  }
+
+  const commentPatterns = [
+    '[class*="comment"]', '[class*="reply"]', '[class*="thread"]',
+    '.comment', '.reply', '.post', '.message',
+  ];
+  let hasNestedComments = false;
+  for (const pattern of commentPatterns) {
+    try {
+      const els = document.querySelectorAll(pattern);
+      for (const el of els) {
+        if (el.querySelector(pattern)) { hasNestedComments = true; break; }
+      }
+    } catch { /* skip */ }
+    if (hasNestedComments) break;
+  }
+
+  let nestingDepth = 0;
+  const mainContent = document.querySelector('main, [role="main"]') || document.body;
+  if (mainContent) {
+    function measureDepth(el, depth) {
+      if (depth > nestingDepth) nestingDepth = depth;
+      if (depth >= 20) return;
+      for (const child of el.children) {
+        if (!SKIP_TAGS.has(child.tagName)) measureDepth(child, depth + 1);
+      }
+    }
+    measureDepth(mainContent, 0);
+  }
+
+  const hasSidebar = regions.includes('sidebar');
+  const hasCodeBlocks = Boolean(document.querySelector('pre code, .highlight, .codehilite'));
+  const hasForms = Boolean(document.querySelector('form, input[type="text"], textarea'));
+
+  const classCounts = new Map();
+  const contentTags = new Set(['DIV', 'SECTION', 'ARTICLE', 'LI', 'TR']);
+  const allEls = document.querySelectorAll('*');
+  for (const el of allEls) {
+    if (!contentTags.has(el.tagName)) continue;
+    for (const cls of el.classList) {
+      if (!cls || cls.length > 40) continue;
+      const key = `${el.tagName.toLowerCase()}.${cls}`;
+      classCounts.set(key, (classCounts.get(key) || 0) + 1);
+    }
+  }
+  const contentSelectors = Array.from(classCounts.entries())
+    .filter(([, count]) => count >= 3)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([selector]) => selector);
+
+  let layoutType = 'generic';
+  if (hasNestedComments || regions.includes('comments')) {
+    layoutType = 'forum';
+  } else {
+    const articles = document.querySelectorAll('article, [class*="post-body"], [class*="article-body"]');
+    if (articles.length === 1) {
+      const text = articles[0].textContent || '';
+      if (text.length > 500) layoutType = 'article';
+    }
+  }
+
+  return {
+    layoutType,
+    regions,
+    nestingDepth: Math.min(nestingDepth, 20),
+    hasNestedComments,
+    hasSidebar,
+    hasCodeBlocks,
+    hasForms,
+    contentSelectors,
+    totalElements,
+  };
+}
+
+const CHROME_TAGS = new Set(['HEADER', 'NAV', 'FOOTER']);
+const INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT', 'LABEL']);
+
+function classifyElementRole(el) {
+  const tag = el.tagName;
+  if (CHROME_TAGS.has(tag)) return 'chrome';
+  if (INTERACTIVE_TAGS.has(tag)) return 'interactive';
+
+  const role = el.getAttribute('role') || '';
+  if (['banner', 'navigation', 'contentinfo'].includes(role)) return 'chrome';
+  if (['button', 'link', 'textbox', 'searchbox', 'combobox'].includes(role)) return 'interactive';
+
+  let parent = el.parentElement;
+  for (let i = 0; i < 3 && parent; i++) {
+    if (CHROME_TAGS.has(parent.tagName)) return 'chrome';
+    const parentRole = parent.getAttribute('role') || '';
+    if (['banner', 'navigation', 'contentinfo'].includes(parentRole)) return 'chrome';
+    parent = parent.parentElement;
+  }
+
+  return 'content';
+}
+
+function contrastRatio(fgColor, bgColor) {
+  const fgInfo = parseColorInfo(fgColor);
+  const bgInfo = parseColorInfo(bgColor);
+  if (!fgInfo || !bgInfo) return null;
+  const l1 = Math.max(fgInfo.luminance, bgInfo.luminance);
+  const l2 = Math.min(fgInfo.luminance, bgInfo.luminance);
+  return Math.round(((l1 + 0.05) / (l2 + 0.05)) * 10) / 10;
 }
 
 function buildShortCssPath(el, escapeFn) {

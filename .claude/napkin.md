@@ -18,6 +18,15 @@
 - Shared module (llm-settings.js) for config used by both options and service worker
 - Content script handles detection/DOM work, service worker orchestrates via messages
 - Return `{ skipped: true, reason }` from generation when pre-checks fail — popup/auto-mode handle gracefully
+- E2E testing: use `chromium.launchPersistentContext` with `--load-extension` flag, use extension pages (options page) to send chrome.runtime messages with explicit tabId
+- Generation quality: specific color palette targets + WCAG contrast ratios + structured custom property strategy in prompts >> generic "generate dark mode" instructions
+- DOM limits: depth matters more than breadth for forums/threads — increase depth even when reducing node count for token budget
+
+## Patterns That Don't Work
+- Service workers can't `chrome.runtime.sendMessage` to themselves — must use extension page context
+- Playwright `page.evaluate` runs in main world where `chrome.runtime` is undefined — can't send extension messages from content pages
+- Generic prompts ("generate dark mode CSS") produce poor results — LLM needs specific palette targets, contrast ratios, and selector strategies
+- Sites with inline `bgcolor` attributes (like HN `<td bgcolor>`) are hard to override even with `!important` — may need two-pass refinement
 
 ## Domain Notes
 - Serenity = Chrome extension for AI-powered dark mode
