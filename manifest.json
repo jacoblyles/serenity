@@ -5,6 +5,7 @@
   "description": "AI-powered dark mode for any website",
   "permissions": [
     "storage",
+    "tabs",
     "activeTab",
     "scripting"
   ],

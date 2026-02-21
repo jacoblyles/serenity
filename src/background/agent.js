@@ -1,5 +1,8 @@
 import { completeLlmRequest } from './llm-client.js';
-import { buildToolResultMessage } from './llm-tools.js';
+import {
+  buildToolResultMessage,
+  buildToolResultMessageWithImage,
+} from './llm-tools.js';
 import { checkContrast } from '../shared/contrast.js';
 import { log } from '../shared/logger.js';
 
@@ -189,6 +192,8 @@ export async function runAgentLoop(tabId, options = {}) {
         break;
       }
 
+      messages.push(buildAssistantToolCallMessage(llmResult.provider, assistantText, toolCalls));
+
       for (const toolCall of toolCalls) {
         const toolResult = await executeAgentTool(tabId, toolCall, {
           onApplyCss(css) {
@@ -204,15 +209,21 @@ export async function runAgentLoop(tabId, options = {}) {
           ? removeScreenshotFromToolResult(toolResult)
           : toolResult;
 
-        messages.push(
-          buildToolResultMessage(
-            llmResult.provider,
-            toolCall.id,
-            toolCall.name,
-            sanitizedToolResult,
-            imageDataUrl
-          )
-        );
+        const toolMessage = imageDataUrl
+          ? buildToolResultMessageWithImage(
+              llmResult.provider,
+              toolCall.id,
+              toolCall.name,
+              sanitizedToolResult,
+              imageDataUrl
+            )
+          : buildToolResultMessage(
+              llmResult.provider,
+              toolCall.id,
+              toolCall.name,
+              sanitizedToolResult
+            );
+        messages.push(toolMessage);
       }
 
       await saveAgentCheckpoint({
@@ -246,6 +257,66 @@ export async function runAgentLoop(tabId, options = {}) {
       error: message,
     };
   }
+}
+
+function buildAssistantToolCallMessage(provider, assistantText, toolCalls) {
+  const safeText = typeof assistantText === 'string' ? assistantText : '';
+  const validToolCalls = toolCalls.filter(
+    (call) => isObject(call) && typeof call.id === 'string' && typeof call.name === 'string'
+  );
+
+  if (provider === 'anthropic') {
+    const content = [];
+    if (safeText) {
+      content.push({ type: 'text', text: safeText });
+    }
+    for (const toolCall of validToolCalls) {
+      content.push({
+        type: 'tool_use',
+        id: toolCall.id,
+        name: toolCall.name,
+        input: isObject(toolCall.arguments) ? toolCall.arguments : {},
+      });
+    }
+    return {
+      role: 'assistant',
+      content,
+    };
+  }
+
+  if (provider === 'google') {
+    const content = [];
+    if (safeText) {
+      content.push({ type: 'text', text: safeText });
+    }
+    for (const toolCall of validToolCalls) {
+      content.push({
+        functionCall: {
+          name: toolCall.name,
+          args: isObject(toolCall.arguments) ? toolCall.arguments : {},
+        },
+      });
+    }
+    return {
+      role: 'assistant',
+      content,
+    };
+  }
+
+  return {
+    role: 'assistant',
+    content: safeText,
+    tool_calls: validToolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      type: 'function',
+      function: {
+        name: toolCall.name,
+        arguments: JSON.stringify(
+          isObject(toolCall.arguments) ? toolCall.arguments : {}
+        ),
+      },
+    })),
+  };
 }
 
 async function executeAgentTool(tabId, toolCall, hooks = {}) {

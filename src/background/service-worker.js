@@ -50,6 +50,8 @@ chrome.runtime.onInstalled.addListener(() => {
     autoMode: false,
     twoPass: true,
     generationMode: 'quick',
+    agentMaxTurns: 5,
+    autoThoroughMode: false,
     selectedModel: 'gpt-5.2',
     feedbackText: '',
     feedbackImages: [],
@@ -273,10 +275,17 @@ async function handleGenerateDarkModeAgent(message, sender) {
   if (tabId === null) {
     return { css: null, turns: 0, provider: null, model: null, error: 'No active tab available for generation' };
   }
+  const metricsUrl = await resolveGenerationMetricsUrl(tabId, message);
+  const mode = 'agent';
+  const { agentMaxTurns } = await chrome.storage.local.get('agentMaxTurns');
+  const fallbackTurns = Number.isInteger(agentMaxTurns) && agentMaxTurns > 0 ? agentMaxTurns : 5;
   const maxTurns =
-    Number.isInteger(message?.maxTurns) && message.maxTurns > 0 ? message.maxTurns : 5;
+    Number.isInteger(message?.maxTurns) && message.maxTurns > 0 ? message.maxTurns : fallbackTurns;
+  const startedAt = Date.now();
 
-  return runAgentLoop(tabId, {
+  await generationStarted(metricsUrl, mode);
+
+  const result = await runAgentLoop(tabId, {
     ...message,
     maxTurns,
     hooks: {
@@ -292,6 +301,26 @@ async function handleGenerateDarkModeAgent(message, sender) {
       },
     },
   });
+
+  const durationMs = Math.max(0, Date.now() - startedAt);
+  if (result?.error) {
+    await generationFailed(metricsUrl, mode, {
+      message: result.error,
+      durationMs,
+    });
+    return result;
+  }
+
+  await generationCompleted(metricsUrl, mode, {
+    provider: result?.provider || null,
+    model: result?.model || null,
+    cssLength: typeof result?.css === 'string' ? result.css.length : 0,
+    turnsUsed: Number.isFinite(result?.turns) ? result.turns : 0,
+    durationMs,
+    usedNativeDarkCss: false,
+    error: null,
+  });
+  return result;
 }
 
 async function handleLlmComplete(message) {

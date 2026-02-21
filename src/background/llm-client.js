@@ -18,11 +18,23 @@ function normalizeMessages(messages, systemPrompt) {
   for (const message of messages || []) {
     if (!message || typeof message !== 'object') continue;
     const content = normalizeMessageContent(message.content);
-    if (!message.role || !content) continue;
-    normalized.push({
-      role: String(message.role),
+    const hasAssistantToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+    if (!message.role || (!content && !hasAssistantToolCalls)) continue;
+    const role = String(message.role);
+    const normalizedMessage = {
+      role,
       content,
-    });
+    };
+
+    if (role === 'assistant' && Array.isArray(message.tool_calls)) {
+      normalizedMessage.tool_calls = normalizeOpenAiAssistantToolCalls(message.tool_calls);
+    }
+
+    if (role === 'tool' && typeof message.tool_call_id === 'string' && message.tool_call_id) {
+      normalizedMessage.tool_call_id = message.tool_call_id;
+    }
+
+    normalized.push(normalizedMessage);
   }
 
   return normalized;
@@ -58,6 +70,20 @@ function normalizeMessageContent(content) {
     }
 
     if (
+      part.type === 'tool_use' &&
+      typeof part.id === 'string' &&
+      typeof part.name === 'string'
+    ) {
+      normalizedParts.push({
+        type: 'tool_use',
+        id: part.id,
+        name: part.name,
+        input: isObject(part.input) ? part.input : {},
+      });
+      continue;
+    }
+
+    if (
       part.functionResponse &&
       typeof part.functionResponse === 'object' &&
       typeof part.functionResponse.name === 'string'
@@ -66,6 +92,20 @@ function normalizeMessageContent(content) {
         functionResponse: {
           name: part.functionResponse.name,
           response: part.functionResponse.response,
+        },
+      });
+      continue;
+    }
+
+    if (
+      part.functionCall &&
+      typeof part.functionCall === 'object' &&
+      typeof part.functionCall.name === 'string'
+    ) {
+      normalizedParts.push({
+        functionCall: {
+          name: part.functionCall.name,
+          args: isObject(part.functionCall.args) ? part.functionCall.args : {},
         },
       });
       continue;
@@ -86,6 +126,25 @@ function normalizeMessageContent(content) {
   }
 
   return normalizedParts.length ? normalizedParts : '';
+}
+
+function normalizeOpenAiAssistantToolCalls(toolCalls) {
+  return toolCalls
+    .map((call) => {
+      const functionName = call?.function?.name;
+      if (typeof functionName !== 'string' || !functionName) return null;
+      const rawArguments = call?.function?.arguments;
+      const parsedArguments = parseToolArguments(rawArguments);
+      return {
+        id: typeof call?.id === 'string' && call.id ? call.id : generateToolCallId(),
+        type: 'function',
+        function: {
+          name: functionName,
+          arguments: JSON.stringify(parsedArguments),
+        },
+      };
+    })
+    .filter(Boolean);
 }
 
 function getErrorMessage(responseBody, fallback) {
@@ -188,10 +247,7 @@ async function requestOpenAiLikeCompletion({
   headers = {},
   tools,
 }) {
-  const normalizedMessages = messages.map((message) => ({
-    role: message.role,
-    content: convertToOpenAiContent(message.content),
-  }));
+  const normalizedMessages = messages.map((message) => convertToOpenAiMessage(message));
   const parsedTools = toOpenAiTools(tools);
 
   const response = await fetch(endpoint, {
@@ -220,6 +276,23 @@ async function requestOpenAiLikeCompletion({
   }
 
   return { text, toolCalls, raw: data };
+}
+
+function convertToOpenAiMessage(message) {
+  const openAiMessage = {
+    role: message.role,
+    content: convertToOpenAiContent(message.content),
+  };
+
+  if (message.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
+    openAiMessage.tool_calls = normalizeOpenAiAssistantToolCalls(message.tool_calls);
+  }
+
+  if (message.role === 'tool' && typeof message.tool_call_id === 'string' && message.tool_call_id) {
+    openAiMessage.tool_call_id = message.tool_call_id;
+  }
+
+  return openAiMessage;
 }
 
 async function requestAnthropicCompletion({
@@ -386,6 +459,20 @@ function convertToAnthropicContent(content) {
     }
 
     if (
+      part.type === 'tool_use' &&
+      typeof part.id === 'string' &&
+      typeof part.name === 'string'
+    ) {
+      parts.push({
+        type: 'tool_use',
+        id: part.id,
+        name: part.name,
+        input: isObject(part.input) ? part.input : {},
+      });
+      continue;
+    }
+
+    if (
       part.type === 'tool_result' &&
       typeof part.tool_use_id === 'string' &&
       (typeof part.content === 'string' || Array.isArray(part.content))
@@ -493,6 +580,20 @@ function convertToGoogleParts(content) {
     }
 
     if (
+      part.functionCall &&
+      typeof part.functionCall === 'object' &&
+      typeof part.functionCall.name === 'string'
+    ) {
+      parts.push({
+        functionCall: {
+          name: part.functionCall.name,
+          args: isObject(part.functionCall.args) ? part.functionCall.args : {},
+        },
+      });
+      continue;
+    }
+
+    if (
       part.functionResponse &&
       typeof part.functionResponse === 'object' &&
       typeof part.functionResponse.name === 'string'
@@ -517,6 +618,30 @@ function parseDataUrl(dataUrl) {
     mimeType: match[1],
     base64Data: match[2],
   };
+}
+
+function parseToolArguments(value) {
+  if (isObject(value)) return value;
+  if (typeof value !== 'string') return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    return isObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function generateToolCallId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `toolcall_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 export async function completeLlmRequest(request = {}) {

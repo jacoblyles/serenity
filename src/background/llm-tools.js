@@ -219,3 +219,13 @@ export function buildToolResultMessage(provider, toolCallId, toolName, result, i
 
   throw new Error(`Unsupported LLM provider for tool result message: ${provider}`)
 }
+
+export function buildToolResultMessageWithImage(
+  provider,
+  toolCallId,
+  toolName,
+  result,
+  imageDataUrl
+) {
+  return buildToolResultMessage(provider, toolCallId, toolName, result, imageDataUrl)
+}
