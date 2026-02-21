@@ -4,6 +4,8 @@ const toggle = document.getElementById('toggle-dark-mode');
 const autoToggle = document.getElementById('toggle-auto-mode');
 const label = document.getElementById('toggle-label');
 const autoLabel = document.getElementById('auto-toggle-label');
+const twoPassToggle = document.getElementById('toggle-two-pass');
+const twoPassLabel = document.getElementById('two-pass-toggle-label');
 const providerSelector = document.getElementById('provider-selector');
 const modelSelector = document.getElementById('model-selector');
 const generateDarkModeBtn = document.getElementById('generate-dark-mode-btn');
@@ -169,8 +171,10 @@ async function init() {
     const response = await chrome.runtime.sendMessage({ type: 'get-popup-state' });
     toggle.checked = Boolean(response.enabled);
     autoToggle.checked = Boolean(response.autoMode);
+    twoPassToggle.checked = typeof response.twoPass === 'boolean' ? response.twoPass : true;
     label.textContent = response.enabled ? 'On' : 'Off';
     autoLabel.textContent = response.autoMode ? 'On' : 'Off';
+    twoPassLabel.textContent = twoPassToggle.checked ? 'On' : 'Off';
     setSelectedModel(response.selectedModel);
     feedbackText.value = response.feedbackText || '';
     feedbackImages = sanitizeFeedbackImages(response.feedbackImages);
@@ -207,6 +211,12 @@ autoToggle.addEventListener('change', async () => {
   const autoMode = autoToggle.checked;
   autoLabel.textContent = autoMode ? 'On' : 'Off';
   await saveState({ autoMode });
+});
+
+twoPassToggle.addEventListener('change', async () => {
+  const twoPass = twoPassToggle.checked;
+  twoPassLabel.textContent = twoPass ? 'On' : 'Off';
+  await saveState({ twoPass });
 });
 
 providerSelector.addEventListener('change', () => {
@@ -282,6 +292,7 @@ generateDarkModeBtn.addEventListener('click', async () => {
       tabId: activeTab.id,
       provider,
       model,
+      twoPass: twoPassToggle.checked,
       screenshotDataUrl,
     });
 

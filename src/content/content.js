@@ -74,6 +74,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'apply-css': (msg) => { injectCSS(msg.css); return { applied: true }; },
     'remove-css': () => { removeCSS(); return { removed: true }; },
     'get-applied-css': () => ({ css: getInjectedCSS() }),
+    'wait-for-paint': () => waitForPaint(),
     'extract-dom': () => extractDOM(),
     'extract-custom-properties': () => extractCustomProperties(),
     'extract-color-map': () => extractColorMap(),
@@ -83,9 +84,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   const handler = handlers[message.type];
   if (handler) {
-    sendResponse(handler(message));
+    Promise.resolve()
+      .then(() => handler(message))
+      .then((response) => sendResponse(response))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Unknown error' }));
+    return true;
   }
 });
+
+function waitForPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      setTimeout(() => resolve({ ok: true }), 150);
+    });
+  });
+}
 
 function extractDOM() {
   const result = {

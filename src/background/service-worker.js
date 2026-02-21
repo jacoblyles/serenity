@@ -42,6 +42,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
     enabled: false,
     autoMode: false,
+    twoPass: true,
     selectedModel: 'gpt-5.2',
     feedbackText: '',
     feedbackImages: [],
@@ -193,6 +194,7 @@ async function handleGetPopupState() {
   const state = await chrome.storage.local.get([
     'enabled',
     'autoMode',
+    'twoPass',
     'selectedModel',
     'feedbackText',
     'feedbackImages',
@@ -207,6 +209,7 @@ async function handleGetPopupState() {
   return {
     enabled: Boolean(state.enabled),
     autoMode: Boolean(state.autoMode),
+    twoPass: typeof state.twoPass === 'boolean' ? state.twoPass : true,
     selectedModel,
     feedbackText: state.feedbackText || '',
     feedbackImages: sanitizeFeedbackImages(state.feedbackImages),
@@ -220,6 +223,9 @@ async function handleSetPopupState(message) {
   }
   if (typeof message.autoMode === 'boolean') {
     update.autoMode = message.autoMode;
+  }
+  if (typeof message.twoPass === 'boolean') {
+    update.twoPass = message.twoPass;
   }
   if (typeof message.selectedModel === 'string') {
     update.selectedModel = KNOWN_MODEL_IDS.has(message.selectedModel)
@@ -281,10 +287,11 @@ async function getStoredStyleForUrl(rawUrl) {
 async function syncTabRememberedStyle(tabId, url) {
   if (typeof tabId !== 'number') return;
 
-  const { enabled, autoMode, selectedModel } = await chrome.storage.local.get([
+  const { enabled, autoMode, selectedModel, twoPass } = await chrome.storage.local.get([
     'enabled',
     'autoMode',
     'selectedModel',
+    'twoPass',
   ]);
   if (!enabled) {
     await removeCssFromTab(tabId);
@@ -305,14 +312,14 @@ async function syncTabRememberedStyle(tabId, url) {
   }
 
   if (autoMode && shouldAutoGenerateForDomain(parsed.domain, styles)) {
-    await maybeAutoGenerateForTab(tabId, url, selectedModel);
+    await maybeAutoGenerateForTab(tabId, url, selectedModel, twoPass);
     return;
   }
 
   await removeCssFromTab(tabId);
 }
 
-async function maybeAutoGenerateForTab(tabId, url, selectedModel) {
+async function maybeAutoGenerateForTab(tabId, url, selectedModel, twoPassSetting) {
   const dedupeKey = `${tabId}:${url}`;
   if (inFlightAutoGeneration.has(dedupeKey)) return;
 
@@ -320,6 +327,7 @@ async function maybeAutoGenerateForTab(tabId, url, selectedModel) {
   try {
     const result = await generateAndApplyDarkMode(tabId, {
       model: typeof selectedModel === 'string' ? selectedModel : undefined,
+      twoPass: typeof twoPassSetting === 'boolean' ? twoPassSetting : true,
     });
     if (!result?.css || result.error) return;
 
@@ -450,7 +458,11 @@ function resolveTabId(message, sender) {
 }
 
 async function generateAndApplyDarkMode(tabId, options = {}) {
-  log.info('generate', 'Starting dark mode generation', { tabId, options: { provider: options.provider, model: options.model } });
+  const twoPass = typeof options.twoPass === 'boolean' ? options.twoPass : true;
+  log.info('generate', 'Starting dark mode generation', {
+    tabId,
+    options: { provider: options.provider, model: options.model, twoPass },
+  });
 
   // Detect if the page already has dark mode
   try {
@@ -494,11 +506,13 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
         tabId,
         cssBytes: extractedNativeDarkCssBytes,
       });
+      log.info('generate', 'Final CSS selected', { finalPass: 0, source: 'native-dark-mode-css' });
       return {
         css: extractedNativeDarkCss,
         applied: true,
         provider: null,
         model: null,
+        finalPass: 0,
         usedNativeDarkModeCss: true,
         nativeDarkCssBytes: extractedNativeDarkCssBytes,
         truncatedContext: Boolean(pageContext?.truncated),
@@ -615,16 +629,118 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     return { css: null, error: 'Generated CSS, but failed to apply it to the page' };
   }
 
-  return {
+  const passOneResult = {
     css,
     applied: true,
     provider: llmResult.provider,
     model: llmResult.model,
+    finalPass: 1,
     usedNativeDarkModeCss: false,
     nativeDarkCssBytes: extractedNativeDarkCssBytes,
     truncatedContext: Boolean(pageContext?.truncated),
     nodeCount: pageContext?.nodeCount || 0,
   };
+
+  if (!twoPass) {
+    log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', twoPassEnabled: false });
+    return passOneResult;
+  }
+
+  const autoFeedback = [
+    'This dark mode CSS was auto-generated.',
+    'Review the screenshot for issues: poor contrast, missed elements, broken layouts, illegible text, elements that are still light-colored.',
+    'Generate improved CSS that fixes any problems you see.',
+  ].join(' ');
+
+  let passTwoScreenshotDataUrl;
+  try {
+    await sendMessageToTabWithInjection(tabId, { type: 'wait-for-paint' });
+    passTwoScreenshotDataUrl = await captureGenerationRefinementScreenshot(tabId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'unknown capture error');
+    log.warn('generate', 'Two-pass refinement skipped: unable to capture screenshot', { tabId, error: message });
+    log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'screenshot-capture-failed' });
+    return passOneResult;
+  }
+
+  const sanitizedScreenshot = sanitizeGenerationScreenshotDataUrl(passTwoScreenshotDataUrl);
+  if (!sanitizedScreenshot) {
+    log.warn('generate', 'Two-pass refinement skipped: screenshot data invalid');
+    log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'screenshot-invalid' });
+    return passOneResult;
+  }
+
+  const refineRequest = {
+    provider: typeof options.provider === 'string' ? options.provider : undefined,
+    model: typeof options.model === 'string' ? options.model : undefined,
+    temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
+    maxTokens: typeof options.maxTokens === 'number' ? options.maxTokens : 3200,
+    systemPrompt: buildRefineSystemPrompt(),
+    messages: [
+      {
+        role: 'user',
+        content: buildRefineUserPrompt({
+          pageContext,
+          currentCss: css,
+          feedback: autoFeedback,
+          feedbackImages: [{ dataUrl: sanitizedScreenshot }],
+        }),
+      },
+    ],
+  };
+
+  let refineResult;
+  try {
+    refineResult = await completeLlmRequest(refineRequest);
+    log.info('generate', 'Two-pass refine response received', {
+      provider: refineResult.provider,
+      model: refineResult.model,
+      textLength: refineResult.text?.length || 0,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'unknown error');
+    log.warn('generate', 'Two-pass refinement failed; keeping pass 1 CSS', { error: message });
+    log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'refine-llm-failed' });
+    return passOneResult;
+  }
+
+  const refinedCss = extractCssFromModelText(refineResult.text || '');
+  if (!refinedCss) {
+    log.warn('generate', 'Two-pass refinement returned invalid CSS; keeping pass 1 CSS');
+    log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'refine-css-invalid' });
+    return passOneResult;
+  }
+
+  try {
+    await sendMessageToTabWithInjection(tabId, { type: 'apply-css', css: refinedCss });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'unknown error');
+    log.warn('generate', 'Two-pass refined CSS could not be applied; keeping pass 1 CSS', { error: message });
+    log.info('generate', 'Final CSS selected', { finalPass: 1, source: 'generation-pass-1', reason: 'refined-css-apply-failed' });
+    return passOneResult;
+  }
+
+  log.info('generate', 'Final CSS selected', { finalPass: 2, source: 'generation-pass-2' });
+
+  return {
+    css: refinedCss,
+    applied: true,
+    provider: refineResult.provider,
+    model: refineResult.model,
+    finalPass: 2,
+    usedNativeDarkModeCss: false,
+    nativeDarkCssBytes: extractedNativeDarkCssBytes,
+    truncatedContext: Boolean(pageContext?.truncated),
+    nodeCount: pageContext?.nodeCount || 0,
+  };
+}
+
+async function captureGenerationRefinementScreenshot(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  if (!Number.isInteger(tab?.windowId)) {
+    throw new Error('Unable to resolve tab window for screenshot capture');
+  }
+  return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
 }
 
 async function handleRefineDarkMode(message, sender) {
