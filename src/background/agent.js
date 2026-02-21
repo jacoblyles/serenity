@@ -224,6 +224,7 @@ export async function runAgentLoop(tabId, options = {}) {
               sanitizedToolResult
             );
         messages.push(toolMessage);
+        pruneScreenshotsInConversation(messages, 1);
       }
 
       await saveAgentCheckpoint({
@@ -237,9 +238,20 @@ export async function runAgentLoop(tabId, options = {}) {
     }
 
     const css = lastAppliedCss || currentCss;
+    if (!css) {
+      await clearAgentCheckpoint();
+      return {
+        css: null,
+        turns,
+        provider,
+        model,
+        error: 'Agent completed without producing CSS',
+      };
+    }
+
     await clearAgentCheckpoint();
     return {
-      css: css || null,
+      css,
       turns,
       provider,
       model,
@@ -487,6 +499,21 @@ function pruneScreenshotsForCheckpoint(messages) {
   }
 
   return cloned;
+}
+
+function pruneScreenshotsInConversation(messages, keepLatest = 1) {
+  if (!Array.isArray(messages)) return;
+
+  const holders = [];
+  for (const message of messages) {
+    collectScreenshotHoldersFromMessage(message, holders);
+  }
+
+  const keep = Math.max(0, Math.floor(keepLatest));
+  const pruneUntil = Math.max(0, holders.length - keep);
+  for (let i = 0; i < pruneUntil; i += 1) {
+    holders[i].setPruned();
+  }
 }
 
 function collectScreenshotHoldersFromMessage(message, holders) {

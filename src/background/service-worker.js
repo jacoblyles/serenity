@@ -206,13 +206,18 @@ async function handleGetPopupState() {
     'autoMode',
     'twoPass',
     'generationMode',
+    'autoThoroughMode',
     'selectedModel',
     'feedbackText',
     'feedbackImages',
   ]);
   const selectedModelRaw = state.selectedModel || 'gpt-5.2';
   const selectedModel = KNOWN_MODEL_IDS.has(selectedModelRaw) ? selectedModelRaw : 'gpt-5.2';
-  const generationMode = state.generationMode === 'thorough' ? 'thorough' : 'quick';
+  const autoThoroughMode = Boolean(state.autoThoroughMode);
+  const generationMode =
+    state.generationMode === 'thorough' || (!state.generationMode && autoThoroughMode)
+      ? 'thorough'
+      : 'quick';
 
   if (selectedModel !== selectedModelRaw) {
     await chrome.storage.local.set({ selectedModel });
@@ -223,6 +228,7 @@ async function handleGetPopupState() {
     autoMode: Boolean(state.autoMode),
     twoPass: typeof state.twoPass === 'boolean' ? state.twoPass : true,
     generationMode,
+    autoThoroughMode,
     selectedModel,
     feedbackText: state.feedbackText || '',
     feedbackImages: sanitizeFeedbackImages(state.feedbackImages),
@@ -310,6 +316,18 @@ async function handleGenerateDarkModeAgent(message, sender) {
     });
     return result;
   }
+  if (!result?.css || typeof result.css !== 'string' || !result.css.trim()) {
+    const error = 'Agent completed without producing CSS';
+    await generationFailed(metricsUrl, mode, {
+      message: error,
+      durationMs,
+    });
+    return {
+      ...result,
+      css: null,
+      error,
+    };
+  }
 
   await generationCompleted(metricsUrl, mode, {
     provider: result?.provider || null,
@@ -356,11 +374,12 @@ async function getStoredStyleForUrl(rawUrl) {
 async function syncTabRememberedStyle(tabId, url) {
   if (typeof tabId !== 'number') return;
 
-  const { enabled, autoMode, selectedModel, twoPass } = await chrome.storage.local.get([
+  const { enabled, autoMode, selectedModel, twoPass, autoThoroughMode } = await chrome.storage.local.get([
     'enabled',
     'autoMode',
     'selectedModel',
     'twoPass',
+    'autoThoroughMode',
   ]);
   if (!enabled) {
     await removeCssFromTab(tabId);
@@ -381,23 +400,28 @@ async function syncTabRememberedStyle(tabId, url) {
   }
 
   if (autoMode && shouldAutoGenerateForDomain(parsed.domain, styles)) {
-    await maybeAutoGenerateForTab(tabId, url, selectedModel, twoPass);
+    await maybeAutoGenerateForTab(tabId, url, selectedModel, twoPass, Boolean(autoThoroughMode));
     return;
   }
 
   await removeCssFromTab(tabId);
 }
 
-async function maybeAutoGenerateForTab(tabId, url, selectedModel, twoPassSetting) {
+async function maybeAutoGenerateForTab(tabId, url, selectedModel, twoPassSetting, autoThoroughMode) {
   const dedupeKey = `${tabId}:${url}`;
   if (inFlightAutoGeneration.has(dedupeKey)) return;
 
   inFlightAutoGeneration.add(dedupeKey);
   try {
-    const result = await generateAndApplyDarkMode(tabId, {
-      model: typeof selectedModel === 'string' ? selectedModel : undefined,
-      twoPass: typeof twoPassSetting === 'boolean' ? twoPassSetting : true,
-    });
+    const result = autoThoroughMode
+      ? await handleGenerateDarkModeAgent({
+          tabId,
+          model: typeof selectedModel === 'string' ? selectedModel : undefined,
+        })
+      : await generateAndApplyDarkMode(tabId, {
+          model: typeof selectedModel === 'string' ? selectedModel : undefined,
+          twoPass: typeof twoPassSetting === 'boolean' ? twoPassSetting : true,
+        });
     if (!result?.css || result.error) return;
 
     const saved = await handleSaveStoredStyle({ url, css: result.css, scope: 'domain', provider: result.provider, model: result.model });
