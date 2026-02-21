@@ -58,6 +58,51 @@
           </button>
         </div>
         <div id="provider-cards" class="cards"></div>
+
+        <section class="advanced-generation" aria-labelledby="advanced-generation-heading">
+          <div class="section-head advanced-head">
+            <h2 id="advanced-generation-heading">Advanced Generation</h2>
+          </div>
+          <div class="card advanced-card">
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">Max agent turns</span>
+                <input
+                  type="number"
+                  id="agent-max-turns"
+                  min="2"
+                  max="10"
+                  step="1"
+                  value="5"
+                  inputmode="numeric"
+                >
+              </label>
+            </div>
+
+            <div class="field">
+              <span class="field-label">Default generation mode</span>
+              <div class="generation-mode-group" role="radiogroup" aria-label="Default generation mode">
+                <label class="mode-option">
+                  <input type="radio" name="generation-mode" value="quick" checked>
+                  <span>Quick (two-pass)</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="generation-mode" value="thorough">
+                  <span>Thorough (agent loop)</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="advanced-note" id="cost-warning-threshold">
+              Agent mode makes 3-5 LLM calls per page. Estimated cost for selected provider: $0.01-0.30 depending on model.
+            </div>
+
+            <label class="toggle-row" for="auto-thorough-mode">
+              <span class="field-label">Auto-thorough for complex sites</span>
+              <input type="checkbox" id="auto-thorough-mode">
+            </label>
+          </div>
+        </section>
       </section>
 
       <!-- Prompts -->

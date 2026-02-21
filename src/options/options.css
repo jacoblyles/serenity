@@ -190,6 +190,64 @@ h2 {
   gap: 10px;
 }
 
+.advanced-generation {
+  margin-top: 24px;
+}
+
+.advanced-head {
+  margin-bottom: 12px;
+}
+
+.advanced-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.generation-mode-group {
+  display: grid;
+  gap: 8px;
+}
+
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.mode-option input {
+  width: auto;
+  margin: 0;
+}
+
+.advanced-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(10, 17, 25, 0.45);
+  padding: 10px 12px;
+}
+
+.toggle-row input {
+  width: auto;
+  margin: 0;
+}
+
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);

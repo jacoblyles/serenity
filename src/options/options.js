@@ -22,6 +22,9 @@ const saveBtn = $('#save-btn');
 const resetBtn = $('#reset-btn');
 const statusEl = $('#status');
 const actionsBar = $('.actions-bar');
+const agentMaxTurnsInput = $('#agent-max-turns');
+const autoThoroughModeCheckbox = $('#auto-thorough-mode');
+const costWarningThresholdEl = $('#cost-warning-threshold');
 const sitesList = $('#sites-list');
 const sitesCount = $('#sites-count');
 const statsTotalEl = $('#stats-total');
@@ -32,9 +35,26 @@ const statsByModeEl = $('#stats-by-mode');
 const statsByProviderEl = $('#stats-by-provider');
 const clearStatsBtn = $('#clear-stats-btn');
 
+const AGENT_TURNS_DEFAULT = 5;
+const AGENT_TURNS_MIN = 2;
+const AGENT_TURNS_MAX = 10;
+const GENERATION_MODE_DEFAULT = 'quick';
+const COST_RANGES_BY_PROVIDER = {
+  openai: '$0.01-0.24',
+  anthropic: '$0.03-0.30',
+  google: '$0.01-0.18',
+  xai: '$0.02-0.22',
+  custom: '$0.01-0.30',
+};
+
 let state = getDefaultLlmSettings();
 let visibleProviders = [];
 let activeTab = 'providers';
+let advancedSettingsState = {
+  agentMaxTurns: AGENT_TURNS_DEFAULT,
+  generationMode: GENERATION_MODE_DEFAULT,
+  autoThoroughMode: false,
+};
 
 const sitesState = {
   loaded: false,
@@ -77,6 +97,49 @@ function formatDuration(durationMs) {
   if (!Number.isFinite(durationMs) || durationMs <= 0) return '0 ms';
   if (durationMs < 1000) return `${Math.round(durationMs)} ms`;
   return `${(durationMs / 1000).toFixed(2)} s`;
+}
+
+function clampAgentTurns(value) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return AGENT_TURNS_DEFAULT;
+  return Math.min(AGENT_TURNS_MAX, Math.max(AGENT_TURNS_MIN, parsed));
+}
+
+function normalizeGenerationMode(rawMode) {
+  if (rawMode === 'thorough' || rawMode === 'agent') return 'thorough';
+  if (rawMode === 'quick' || rawMode === 'two-pass') return 'quick';
+  return GENERATION_MODE_DEFAULT;
+}
+
+function updateCostWarning() {
+  const providerKey = state.provider || 'custom';
+  const providerLabel = PROVIDER_CONFIG[providerKey]?.label || 'Selected provider';
+  const range = COST_RANGES_BY_PROVIDER[providerKey] || COST_RANGES_BY_PROVIDER.custom;
+
+  costWarningThresholdEl.textContent =
+    `Agent mode makes 3-5 LLM calls per page. Estimated cost for ${providerLabel}: ${range} depending on model.`;
+}
+
+function applyAdvancedSettingsToUi(settings) {
+  const maxTurns = clampAgentTurns(settings.agentMaxTurns);
+  const generationMode = normalizeGenerationMode(settings.generationMode);
+  const autoThoroughMode = Boolean(settings.autoThoroughMode);
+
+  agentMaxTurnsInput.value = String(maxTurns);
+  const modeInput = document.querySelector(`input[name="generation-mode"][value="${generationMode}"]`);
+  if (modeInput) modeInput.checked = true;
+  autoThoroughModeCheckbox.checked = autoThoroughMode;
+}
+
+function collectAdvancedSettings() {
+  const checkedMode = document.querySelector('input[name="generation-mode"]:checked')?.value;
+  const mode = normalizeGenerationMode(checkedMode);
+
+  return {
+    agentMaxTurns: clampAgentTurns(agentMaxTurnsInput.value),
+    generationMode: mode,
+    autoThoroughMode: Boolean(autoThoroughModeCheckbox.checked),
+  };
 }
 
 function renderStatsRows(container, entries, formatter) {
@@ -270,6 +333,9 @@ function switchCardProvider(card, oldProvider, newProvider) {
   visibleProviders.push(newProvider);
   refreshProviderSelects();
   updateProviderControls();
+  if (wasDefault) {
+    updateCostWarning();
+  }
 }
 
 function setDefaultProvider(provider) {
@@ -279,6 +345,7 @@ function setDefaultProvider(provider) {
     card.classList.toggle('is-default', match);
     card.querySelector('.default-pill').classList.toggle('active', match);
   });
+  updateCostWarning();
 }
 
 function removeProviderCard(card) {
@@ -540,13 +607,16 @@ async function save() {
   }
 
   settings.prompts = collectPrompts();
+  const advancedSettings = collectAdvancedSettings();
+  advancedSettingsState = advancedSettings;
 
   const defaultModel = settings.models[settings.provider] || '';
-  const update = { llmSettings: settings };
+  const update = { llmSettings: settings, ...advancedSettings };
   if (defaultModel) update.selectedModel = defaultModel;
 
   await chrome.storage.local.set(update);
   state = mergeLlmSettings(settings);
+  updateCostWarning();
 
   saveBtn.textContent = 'Saved';
   saveBtn.classList.add('saved');
@@ -850,10 +920,18 @@ async function initDebugUI() {
 
 async function init() {
   try {
-    const { llmSettings } = await chrome.storage.local.get('llmSettings');
+    const { llmSettings, agentMaxTurns, generationMode, autoThoroughMode } =
+      await chrome.storage.local.get(['llmSettings', 'agentMaxTurns', 'generationMode', 'autoThoroughMode']);
     state = mergeLlmSettings(llmSettings);
+    advancedSettingsState = {
+      agentMaxTurns: clampAgentTurns(agentMaxTurns),
+      generationMode: normalizeGenerationMode(generationMode),
+      autoThoroughMode: Boolean(autoThoroughMode),
+    };
     renderProviders();
     renderPrompts();
+    applyAdvancedSettingsToUi(advancedSettingsState);
+    updateCostWarning();
   } catch {
     flash('Failed to load settings', 'error');
   }
@@ -861,11 +939,23 @@ async function init() {
   saveBtn.addEventListener('click', save);
 
   resetBtn.addEventListener('click', async () => {
-    const { llmSettings } = await chrome.storage.local.get('llmSettings');
+    const { llmSettings, agentMaxTurns, generationMode, autoThoroughMode } =
+      await chrome.storage.local.get(['llmSettings', 'agentMaxTurns', 'generationMode', 'autoThoroughMode']);
     state = mergeLlmSettings(llmSettings);
+    advancedSettingsState = {
+      agentMaxTurns: clampAgentTurns(agentMaxTurns),
+      generationMode: normalizeGenerationMode(generationMode),
+      autoThoroughMode: Boolean(autoThoroughMode),
+    };
     renderProviders();
     renderPrompts();
+    applyAdvancedSettingsToUi(advancedSettingsState);
+    updateCostWarning();
     flash('Reset to saved');
+  });
+
+  agentMaxTurnsInput.addEventListener('blur', () => {
+    agentMaxTurnsInput.value = String(clampAgentTurns(agentMaxTurnsInput.value));
   });
 
   addProviderBtn.addEventListener('click', () => {
