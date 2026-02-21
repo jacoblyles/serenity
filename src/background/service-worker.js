@@ -2,6 +2,7 @@
 // Handles messaging between popup/content scripts and LLM providers
 
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
+import { runAgentLoop } from './agent.js';
 import { mergeLlmSettings, PROVIDER_MODELS } from '../shared/llm-settings.js';
 import { log } from '../shared/logger.js';
 import {
@@ -77,6 +78,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'get-popup-state': handleGetPopupState,
     'set-popup-state': handleSetPopupState,
     'generate-dark-mode': handleGenerateDarkMode,
+    'generate-dark-mode-agent': handleGenerateDarkModeAgent,
     'refine-dark-mode': handleRefineDarkMode,
   };
 
@@ -252,6 +254,14 @@ async function handleGenerateDarkMode(message, sender) {
     return { css: null, error: 'No active tab available for generation' };
   }
   return generateAndApplyDarkMode(tabId, message);
+}
+
+async function handleGenerateDarkModeAgent(message, sender) {
+  const tabId = resolveTabId(message, sender);
+  if (tabId === null) {
+    return { css: null, turns: 0, provider: null, model: null, error: 'No active tab available for generation' };
+  }
+  return runAgentLoop(tabId, message);
 }
 
 async function handleLlmComplete(message) {

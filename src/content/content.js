@@ -75,6 +75,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'remove-css': () => { removeCSS(); return { removed: true }; },
     'get-applied-css': () => ({ css: getInjectedCSS() }),
     'wait-for-paint': () => waitForPaint(),
+    'scroll-to': (msg) => scrollToY(msg.y),
+    'inspect-elements': (msg) => inspectElements(msg),
+    'extract-page-context': () => extractDOM(),
     'extract-dom': () => extractDOM(),
     'extract-custom-properties': () => extractCustomProperties(),
     'extract-color-map': () => extractColorMap(),
@@ -97,6 +100,55 @@ function waitForPaint() {
     requestAnimationFrame(() => {
       setTimeout(() => resolve({ ok: true }), 150);
     });
+  });
+}
+
+function scrollToY(y) {
+  const targetY = Number.isFinite(Number(y)) ? Number(y) : 0;
+  window.scrollTo(0, targetY);
+  return waitForPaint().then(() => ({ ok: true, y: targetY }));
+}
+
+function inspectElements(message) {
+  const selector = typeof message?.selector === 'string' ? message.selector.trim() : '';
+  if (!selector) return [];
+
+  const parsedLimit = Number(message?.limit);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+    ? Math.min(Math.floor(parsedLimit), 100)
+    : 10;
+
+  let matches = [];
+  try {
+    matches = Array.from(document.querySelectorAll(selector));
+  } catch (_error) {
+    return [];
+  }
+
+  return matches.slice(0, limit).map((el) => {
+    const style = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return {
+      selector: buildCompactSelector(el),
+      tagName: el.tagName,
+      computedStyles: {
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        display: style.display,
+        position: style.position,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        borderColor: style.borderColor,
+      },
+      boundingRect: {
+        top: Math.round(rect.top),
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+    };
   });
 }
 
