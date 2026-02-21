@@ -157,6 +157,49 @@ h1 {
   margin-bottom: 10px;
 }
 
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border: 1px solid #2e2e52;
+  border-radius: 8px;
+  background: #131327;
+  padding: 3px;
+}
+
+.segment-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: transparent;
+  color: #8f8fb8;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.segment-btn:hover {
+  color: #c9c9e8;
+  background: rgba(108, 99, 255, 0.08);
+}
+
+.segment-btn.is-selected {
+  color: #f7f7ff;
+  background: linear-gradient(135deg, #5a52e0, #6c63ff);
+  box-shadow: 0 1px 5px rgba(108, 99, 255, 0.3);
+}
+
+.segment-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
 .field-label {
   display: block;
   font-size: 11px;
@@ -243,6 +286,14 @@ h1 {
   opacity: 0.5;
   cursor: default;
   transform: none;
+}
+
+#generation-progress {
+  margin-top: 7px;
+  min-height: 14px;
+  font-size: 11px;
+  color: #7f7fb0;
+  text-align: center;
 }
 
 .btn-icon {

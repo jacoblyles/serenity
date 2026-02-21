@@ -8,7 +8,9 @@ const twoPassToggle = document.getElementById('toggle-two-pass');
 const twoPassLabel = document.getElementById('two-pass-toggle-label');
 const providerSelector = document.getElementById('provider-selector');
 const modelSelector = document.getElementById('model-selector');
+const generationModeButtons = Array.from(document.querySelectorAll('[data-generation-mode]'));
 const generateDarkModeBtn = document.getElementById('generate-dark-mode-btn');
+const generationProgress = document.getElementById('generation-progress');
 const openSettingsBtn = document.getElementById('open-settings-btn');
 const feedbackText = document.getElementById('feedback-text');
 const feedbackImageBtn = document.getElementById('feedback-image-btn');
@@ -20,6 +22,7 @@ let feedbackSaveTimer = null;
 let feedbackImages = [];
 let isGenerating = false;
 let isRefining = false;
+let generationMode = 'quick';
 
 const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
@@ -172,6 +175,7 @@ async function init() {
     toggle.checked = Boolean(response.enabled);
     autoToggle.checked = Boolean(response.autoMode);
     twoPassToggle.checked = typeof response.twoPass === 'boolean' ? response.twoPass : true;
+    setGenerationMode(response.generationMode);
     label.textContent = response.enabled ? 'On' : 'Off';
     autoLabel.textContent = response.autoMode ? 'On' : 'Off';
     twoPassLabel.textContent = twoPassToggle.checked ? 'On' : 'Off';
@@ -180,8 +184,19 @@ async function init() {
     feedbackImages = sanitizeFeedbackImages(response.feedbackImages);
     renderFeedbackImages();
     status.textContent = '';
+    generationProgress.textContent = '';
   } catch (error) {
     status.textContent = 'Unable to load popup state';
+  }
+}
+
+function setGenerationMode(nextMode) {
+  generationMode = nextMode === 'thorough' ? 'thorough' : 'quick';
+  for (const button of generationModeButtons) {
+    const buttonMode = button.dataset.generationMode;
+    const selected = buttonMode === generationMode;
+    button.classList.toggle('is-selected', selected);
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
   }
 }
 
@@ -236,6 +251,17 @@ modelSelector.addEventListener('change', async () => {
   await saveState({ selectedModel: modelSelector.value });
 });
 
+for (const button of generationModeButtons) {
+  button.addEventListener('click', async () => {
+    const selectedMode = button.dataset.generationMode;
+    if (selectedMode !== 'quick' && selectedMode !== 'thorough') return;
+    if (generationMode === selectedMode) return;
+    setGenerationMode(selectedMode);
+    generationProgress.textContent = '';
+    await saveState({ generationMode: selectedMode });
+  });
+}
+
 feedbackText.addEventListener('input', async () => {
   clearTimeout(feedbackSaveTimer);
   feedbackSaveTimer = setTimeout(() => {
@@ -272,6 +298,7 @@ generateDarkModeBtn.addEventListener('click', async () => {
   if (isGenerating) return;
 
   setGenerateInFlight(true);
+  generationProgress.textContent = '';
   status.textContent = 'Generating dark mode\u2026';
 
   try {
@@ -287,14 +314,23 @@ generateDarkModeBtn.addEventListener('click', async () => {
         ? await captureGenerationScreenshot(activeTab.windowId)
         : null;
 
-    const result = await chrome.runtime.sendMessage({
-      type: 'generate-dark-mode',
-      tabId: activeTab.id,
-      provider,
-      model,
-      twoPass: twoPassToggle.checked,
-      screenshotDataUrl,
-    });
+    const request = generationMode === 'thorough'
+      ? {
+          type: 'generate-dark-mode-agent',
+          tabId: activeTab.id,
+          provider,
+          model,
+        }
+      : {
+          type: 'generate-dark-mode',
+          tabId: activeTab.id,
+          provider,
+          model,
+          twoPass: twoPassToggle.checked,
+          screenshotDataUrl,
+        };
+
+    const result = await chrome.runtime.sendMessage(request);
 
     if (result?.skipped) {
       status.textContent = 'This site already has a dark mode';
@@ -323,8 +359,23 @@ generateDarkModeBtn.addEventListener('click', async () => {
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : 'Failed to generate dark mode';
   } finally {
+    generationProgress.textContent = '';
     setGenerateInFlight(false);
   }
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (!message || message.type !== 'agent-progress') return;
+  if (!isGenerating || generationMode !== 'thorough') return;
+
+  const turn = Number(message.turn);
+  const maxTurns = Number(message.maxTurns);
+  if (!Number.isFinite(turn) || !Number.isFinite(maxTurns) || maxTurns <= 0) {
+    generationProgress.textContent = '';
+    return;
+  }
+
+  generationProgress.textContent = `Turn ${turn}/${maxTurns}\u2026`;
 });
 
 refineDarkModeBtn.addEventListener('click', async () => {

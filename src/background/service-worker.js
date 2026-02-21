@@ -49,6 +49,7 @@ chrome.runtime.onInstalled.addListener(() => {
     enabled: false,
     autoMode: false,
     twoPass: true,
+    generationMode: 'quick',
     selectedModel: 'gpt-5.2',
     feedbackText: '',
     feedbackImages: [],
@@ -202,12 +203,14 @@ async function handleGetPopupState() {
     'enabled',
     'autoMode',
     'twoPass',
+    'generationMode',
     'selectedModel',
     'feedbackText',
     'feedbackImages',
   ]);
   const selectedModelRaw = state.selectedModel || 'gpt-5.2';
   const selectedModel = KNOWN_MODEL_IDS.has(selectedModelRaw) ? selectedModelRaw : 'gpt-5.2';
+  const generationMode = state.generationMode === 'thorough' ? 'thorough' : 'quick';
 
   if (selectedModel !== selectedModelRaw) {
     await chrome.storage.local.set({ selectedModel });
@@ -217,6 +220,7 @@ async function handleGetPopupState() {
     enabled: Boolean(state.enabled),
     autoMode: Boolean(state.autoMode),
     twoPass: typeof state.twoPass === 'boolean' ? state.twoPass : true,
+    generationMode,
     selectedModel,
     feedbackText: state.feedbackText || '',
     feedbackImages: sanitizeFeedbackImages(state.feedbackImages),
@@ -233,6 +237,9 @@ async function handleSetPopupState(message) {
   }
   if (typeof message.twoPass === 'boolean') {
     update.twoPass = message.twoPass;
+  }
+  if (typeof message.generationMode === 'string') {
+    update.generationMode = message.generationMode === 'thorough' ? 'thorough' : 'quick';
   }
   if (typeof message.selectedModel === 'string') {
     update.selectedModel = KNOWN_MODEL_IDS.has(message.selectedModel)
@@ -266,7 +273,25 @@ async function handleGenerateDarkModeAgent(message, sender) {
   if (tabId === null) {
     return { css: null, turns: 0, provider: null, model: null, error: 'No active tab available for generation' };
   }
-  return runAgentLoop(tabId, message);
+  const maxTurns =
+    Number.isInteger(message?.maxTurns) && message.maxTurns > 0 ? message.maxTurns : 5;
+
+  return runAgentLoop(tabId, {
+    ...message,
+    maxTurns,
+    hooks: {
+      onTurnStart({ turn }) {
+        void chrome.runtime
+          .sendMessage({
+            type: 'agent-progress',
+            turn,
+            maxTurns,
+            status: 'thinking',
+          })
+          .catch(() => {});
+      },
+    },
+  });
 }
 
 async function handleLlmComplete(message) {

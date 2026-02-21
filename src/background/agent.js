@@ -93,6 +93,7 @@ export async function runAgentLoop(tabId, options = {}) {
   let model = typeof options.model === 'string' ? options.model : null;
   let messages = [];
   let activeUrl = '';
+  const hooks = isObject(options.hooks) ? options.hooks : {};
 
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -141,6 +142,14 @@ export async function runAgentLoop(tabId, options = {}) {
       if (activeUrl && currentUrl && currentUrl !== activeUrl) {
         await log.warn('agent', 'Tab URL changed during run', { from: activeUrl, to: currentUrl });
         break;
+      }
+
+      if (typeof hooks.onTurnStart === 'function') {
+        try {
+          await hooks.onTurnStart({ turn: turns + 1, maxTurns, tabId, url: activeUrl });
+        } catch {
+          // Ignore progress hook failures and continue generation.
+        }
       }
 
       const llmResult = await completeLlmRequest({
