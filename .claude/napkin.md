@@ -22,7 +22,9 @@
 ## Domain Notes
 - Serenity = Chrome extension for AI-powered dark mode
 - Settings stored under `llmSettings` key in chrome.storage.local
-- Provider config: openai, anthropic, google, custom
-- Options page is a full HTML page (not popup)
+- Provider config: openai, anthropic, google, xai, custom
+- Options page is a full HTML page (not popup) with vertical tab nav
 - MV3 default CSP allows external stylesheets/fonts (only scripts restricted)
-- Prompts are hardcoded in service-worker.js - being moved to shared config
+- Dark mode CSS stored in `darkModeStyles` with v2 schema: versions array per domain/page, activeVersionId, max 8 versions
+- style-storage.js handles migration from v1 (flat css) to v2 (versioned)
+- Sites tab saves immediately (no Save/Reset), providers/prompts use Save/Reset

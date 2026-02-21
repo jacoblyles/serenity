@@ -236,6 +236,8 @@ generateDarkModeBtn.addEventListener('click', async () => {
       url: activeTab.url,
       css: result.css,
       scope: 'domain',
+      provider: result.provider,
+      model: result.model,
     });
     if (!saved?.ok) {
       throw new Error(saved?.error || 'Generated CSS but could not save it');
@@ -293,6 +295,8 @@ refineDarkModeBtn.addEventListener('click', async () => {
       url: activeTab.url,
       css: result.css,
       scope: 'domain',
+      provider: result.provider,
+      model: result.model,
     });
     if (!saved?.ok) {
       throw new Error(saved?.error || 'Refined CSS generated but could not save it');

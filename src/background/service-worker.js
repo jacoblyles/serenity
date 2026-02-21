@@ -4,8 +4,13 @@
 import { completeLlmRequest, listSupportedProviders } from './llm-client.js';
 import { mergeLlmSettings } from '../shared/llm-settings.js';
 import { log } from '../shared/logger.js';
+import {
+  STYLE_STORAGE_KEY,
+  MAX_VERSIONS,
+  ensureMigratedStyles,
+  createVersion,
+} from '../shared/style-storage.js';
 
-const STYLE_STORAGE_KEY = 'darkModeStyles';
 const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
 const MAX_FEEDBACK_IMAGE_NAME_LENGTH = 80;
@@ -99,22 +104,35 @@ async function handleSaveStoredStyle(message, sender) {
 
   const scope = message.scope === 'page' ? 'page' : 'domain';
   const styles = await loadStyleStorage();
-  const existingDomainEntry = styles[parsed.domain];
-  const domainEntry = {
-    css: typeof existingDomainEntry?.css === 'string' ? existingDomainEntry.css : null,
-    pages: isObject(existingDomainEntry?.pages) ? existingDomainEntry.pages : {},
-  };
+
+  if (!styles[parsed.domain]) {
+    styles[parsed.domain] = { activeVersionId: null, versions: [], pages: {} };
+  }
+  const entry = styles[parsed.domain];
+
+  const newVersion = createVersion(message.css, {
+    scope,
+    prefix: scope === 'page' ? 'pv' : 'v',
+    provider: message.provider || null,
+    model: message.model || null,
+  });
 
   if (scope === 'page') {
-    domainEntry.pages[parsed.page] = message.css;
+    if (!entry.pages[parsed.page]) {
+      entry.pages[parsed.page] = { activeVersionId: null, versions: [] };
+    }
+    const pageEntry = entry.pages[parsed.page];
+    pageEntry.versions.unshift(newVersion);
+    pageEntry.versions = pageEntry.versions.slice(0, MAX_VERSIONS);
+    pageEntry.activeVersionId = newVersion.id;
   } else {
-    domainEntry.css = message.css;
+    entry.versions.unshift(newVersion);
+    entry.versions = entry.versions.slice(0, MAX_VERSIONS);
+    entry.activeVersionId = newVersion.id;
   }
 
-  styles[parsed.domain] = domainEntry;
   await chrome.storage.local.set({ [STYLE_STORAGE_KEY]: styles });
-
-  return { ok: true, domain: parsed.domain, page: parsed.page, scope };
+  return { ok: true, domain: parsed.domain, page: parsed.page, scope, versionId: newVersion.id };
 }
 
 async function handleDeleteStoredStyle(message, sender) {
@@ -124,26 +142,25 @@ async function handleDeleteStoredStyle(message, sender) {
 
   const scope = message.scope === 'page' ? 'page' : 'domain';
   const styles = await loadStyleStorage();
-  const domainEntry = styles[parsed.domain];
-  if (!domainEntry) return { ok: true, deleted: false };
+  const entry = styles[parsed.domain];
+  if (!entry) return { ok: true, deleted: false };
 
   let deleted = false;
   if (scope === 'page') {
-    if (isObject(domainEntry.pages) && parsed.page in domainEntry.pages) {
-      delete domainEntry.pages[parsed.page];
+    if (isObject(entry.pages) && parsed.page in entry.pages) {
+      delete entry.pages[parsed.page];
       deleted = true;
     }
-  } else if ('css' in domainEntry) {
-    domainEntry.css = null;
+  } else {
+    entry.versions = [];
+    entry.activeVersionId = null;
     deleted = true;
   }
 
-  const hasPages = isObject(domainEntry.pages) && Object.keys(domainEntry.pages).length > 0;
-  const hasDomainCss = typeof domainEntry.css === 'string';
-  if (!hasPages && !hasDomainCss) {
+  const hasPages = isObject(entry.pages) && Object.keys(entry.pages).length > 0;
+  const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0;
+  if (!hasPages && !hasVersions) {
     delete styles[parsed.domain];
-  } else {
-    styles[parsed.domain] = domainEntry;
   }
 
   await chrome.storage.local.set({ [STYLE_STORAGE_KEY]: styles });
@@ -216,8 +233,11 @@ async function handleLlmProviders() {
 
 async function loadStyleStorage() {
   const data = await chrome.storage.local.get(STYLE_STORAGE_KEY);
-  if (!isObject(data[STYLE_STORAGE_KEY])) return {};
-  return data[STYLE_STORAGE_KEY];
+  const { styles, migrated } = ensureMigratedStyles(data[STYLE_STORAGE_KEY]);
+  if (migrated) {
+    await chrome.storage.local.set({ [STYLE_STORAGE_KEY]: styles });
+  }
+  return styles;
 }
 
 async function getStoredStyleForUrl(rawUrl) {
@@ -273,7 +293,7 @@ async function maybeAutoGenerateForTab(tabId, url, selectedModel) {
     });
     if (!result?.css || result.error) return;
 
-    const saved = await handleSaveStoredStyle({ url, css: result.css, scope: 'domain' });
+    const saved = await handleSaveStoredStyle({ url, css: result.css, scope: 'domain', provider: result.provider, model: result.model });
     if (!saved?.ok) {
       console.warn('Serenity auto-mode: failed to store generated CSS', saved?.error || 'Unknown error');
     }
@@ -298,7 +318,9 @@ async function sendMessageToTab(tabId, message) {
 function shouldAutoGenerateForDomain(domain, styles) {
   if (typeof domain !== 'string' || !domain) return false;
   if (!isObject(styles)) return true;
-  return !Object.hasOwn(styles, domain);
+  if (!Object.hasOwn(styles, domain)) return true;
+  const entry = styles[domain];
+  return !entry?.activeVersionId && (!Array.isArray(entry?.versions) || entry.versions.length === 0);
 }
 
 function parseURL(rawUrl) {
@@ -320,16 +342,18 @@ function parseURL(rawUrl) {
 }
 
 function getStoredStyleForParsedUrl(parsed, styles) {
-  const domainEntry = styles[parsed.domain];
-  if (!domainEntry) return { css: null, scope: null, found: false };
+  const entry = styles[parsed.domain];
+  if (!entry) return { css: null, scope: null, found: false };
 
-  const pageCss = domainEntry.pages?.[parsed.page];
-  if (typeof pageCss === 'string') {
-    return { css: pageCss, scope: 'page', found: true };
+  const pageEntry = entry.pages?.[parsed.page];
+  if (pageEntry?.activeVersionId) {
+    const active = pageEntry.versions?.find((v) => v.id === pageEntry.activeVersionId);
+    if (active) return { css: active.css, scope: 'page', found: true };
   }
 
-  if (typeof domainEntry.css === 'string') {
-    return { css: domainEntry.css, scope: 'domain', found: true };
+  if (entry.activeVersionId) {
+    const active = entry.versions?.find((v) => v.id === entry.activeVersionId);
+    if (active) return { css: active.css, scope: 'domain', found: true };
   }
 
   return { css: null, scope: null, found: false };

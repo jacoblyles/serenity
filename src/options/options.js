@@ -8,6 +8,7 @@ import {
   mergeLlmSettings,
 } from '../shared/llm-settings.js';
 import { getLogs, clearLogs, setLogging, getLoggingEnabled } from '../shared/logger.js';
+import { STYLE_STORAGE_KEY, ensureMigratedStyles } from '../shared/style-storage.js';
 
 const ALL_PROVIDERS = [...MANAGED_PROVIDERS, 'custom'];
 
@@ -19,9 +20,21 @@ const addPromptBtn = $('#add-prompt');
 const saveBtn = $('#save-btn');
 const resetBtn = $('#reset-btn');
 const statusEl = $('#status');
+const actionsBar = $('.actions-bar');
+const sitesList = $('#sites-list');
+const sitesCount = $('#sites-count');
 
 let state = getDefaultLlmSettings();
 let visibleProviders = [];
+let activeTab = 'providers';
+
+const sitesState = {
+  loaded: false,
+  styles: {},
+  expandedDomains: new Set(),
+};
+
+// ─── Utilities ───
 
 function flash(msg, type = '') {
   statusEl.textContent = msg;
@@ -47,6 +60,37 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
+
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// ─── Tab Switching ───
+
+function switchTab(tabName) {
+  activeTab = tabName;
+
+  document.querySelectorAll('.nav-tab').forEach((tab) => {
+    const isActive = tab.dataset.tab === tabName;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  document.querySelectorAll('.tab-panel').forEach((panel) => {
+    const shouldShow = panel.id === `panel-${tabName}`;
+    panel.classList.toggle('active', shouldShow);
+    panel.hidden = !shouldShow;
+  });
+
+  const hideActions = tabName === 'sites' || tabName === 'debug';
+  actionsBar.classList.toggle('hidden', hideActions);
+
+  if (tabName === 'sites' && !sitesState.loaded) {
+    loadSites();
+  }
+}
+
+// ─── Provider Cards ───
 
 function getAvailableProviders(include) {
   return ALL_PROVIDERS.filter((p) => p === include || !visibleProviders.includes(p));
@@ -218,6 +262,8 @@ function updateProviderControls() {
   });
 }
 
+// ─── Prompt Cards ───
+
 function buildBuiltinPromptCard() {
   const isDefault = !state.prompts?.activeId;
   const card = document.createElement('div');
@@ -308,6 +354,8 @@ function setDefaultPrompt(id) {
   });
 }
 
+// ─── Render ───
+
 function renderProviders() {
   providerContainer.innerHTML = '';
   visibleProviders = [];
@@ -336,6 +384,8 @@ function renderPrompts() {
     promptContainer.appendChild(buildCustomPromptCard(prompt));
   }
 }
+
+// ─── Collect & Save ───
 
 function parseHeadersJson(value) {
   const text = value.trim();
@@ -441,6 +491,297 @@ async function save() {
   }, 1500);
 }
 
+// ─── Sites Management ───
+
+async function loadSites() {
+  try {
+    const data = await chrome.storage.local.get(STYLE_STORAGE_KEY);
+    const { styles, migrated } = ensureMigratedStyles(data[STYLE_STORAGE_KEY]);
+    sitesState.styles = styles;
+    sitesState.loaded = true;
+    if (migrated) {
+      await chrome.storage.local.set({ [STYLE_STORAGE_KEY]: styles });
+    }
+    renderSites();
+  } catch {
+    sitesList.innerHTML = '<div class="sites-empty">Failed to load saved sites.</div>';
+    sitesCount.textContent = '0 sites';
+  }
+}
+
+function renderSites() {
+  sitesList.innerHTML = '';
+  const entries = Object.entries(sitesState.styles)
+    .filter(([key]) => key !== '_schemaVersion')
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  sitesCount.textContent = `${entries.length} site${entries.length !== 1 ? 's' : ''}`;
+
+  if (entries.length === 0) {
+    sitesList.innerHTML = '<div class="sites-empty">No saved site styles yet. Generate dark mode for a site using the popup, and it will appear here.</div>';
+    return;
+  }
+
+  for (const [domain, entry] of entries) {
+    sitesList.appendChild(buildSiteCard(domain, entry));
+  }
+}
+
+function formatDate(timestamp) {
+  if (!timestamp) return 'Unknown';
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) return 'Unknown';
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+}
+
+function previewCss(css) {
+  if (!css) return '';
+  const lines = css.split('\n').slice(0, 3).map((l) => l.trim());
+  const text = lines.join('\n');
+  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+}
+
+function buildSiteCard(domain, entry) {
+  const card = document.createElement('div');
+  card.className = 'site-card';
+  if (sitesState.expandedDomains.has(domain)) card.classList.add('expanded');
+
+  const versions = Array.isArray(entry.versions) ? entry.versions : [];
+  const pages = isObject(entry.pages) ? entry.pages : {};
+  const pageCount = Object.keys(pages).length;
+  const letter = domain.replace(/^www\./, '').charAt(0).toUpperCase();
+
+  const summary = document.createElement('button');
+  summary.type = 'button';
+  summary.className = 'site-summary';
+  summary.innerHTML = `
+    <div class="site-identity">
+      <span class="site-letter">${escapeHtml(letter)}</span>
+      <div class="site-info">
+        <span class="site-domain">${escapeHtml(domain)}</span>
+        <span class="site-meta">${versions.length} version${versions.length !== 1 ? 's' : ''}${pageCount ? ` · ${pageCount} page${pageCount !== 1 ? 's' : ''}` : ''}</span>
+      </div>
+    </div>
+    <span class="site-chevron">▾</span>
+  `;
+  summary.addEventListener('click', () => {
+    if (sitesState.expandedDomains.has(domain)) {
+      sitesState.expandedDomains.delete(domain);
+    } else {
+      sitesState.expandedDomains.add(domain);
+    }
+    renderSites();
+  });
+
+  const detail = document.createElement('div');
+  detail.className = 'site-detail';
+
+  const actions = document.createElement('div');
+  actions.className = 'site-actions';
+  const deleteAllBtn = document.createElement('button');
+  deleteAllBtn.type = 'button';
+  deleteAllBtn.className = 'btn-sm warn';
+  deleteAllBtn.textContent = 'Delete all styles';
+  deleteAllBtn.addEventListener('click', () => deleteDomain(domain));
+  actions.appendChild(deleteAllBtn);
+  detail.appendChild(actions);
+
+  const versionList = document.createElement('div');
+  versionList.className = 'version-list';
+  for (const version of versions) {
+    versionList.appendChild(buildVersionItem(domain, version, version.id === entry.activeVersionId));
+  }
+  if (versions.length === 0) {
+    versionList.innerHTML = '<div class="sites-empty" style="padding:12px;font-size:0.76rem">No domain-level versions.</div>';
+  }
+  detail.appendChild(versionList);
+
+  if (pageCount > 0) {
+    const pageWrap = document.createElement('details');
+    pageWrap.className = 'page-styles-wrap';
+    pageWrap.innerHTML = `<summary>Page-specific styles (${pageCount})</summary>`;
+    for (const [pagePath, pageEntry] of Object.entries(pages)) {
+      if (!isObject(pageEntry)) continue;
+      const pageBlock = document.createElement('div');
+      pageBlock.className = 'page-block';
+      pageBlock.innerHTML = `<div class="page-path">${escapeHtml(pagePath)}</div>`;
+      const pageVersions = Array.isArray(pageEntry.versions) ? pageEntry.versions : [];
+      for (const pv of pageVersions) {
+        pageBlock.appendChild(buildVersionItem(domain, pv, pv.id === pageEntry.activeVersionId, pagePath));
+      }
+      pageWrap.appendChild(pageBlock);
+    }
+    detail.appendChild(pageWrap);
+  }
+
+  card.appendChild(summary);
+  card.appendChild(detail);
+  return card;
+}
+
+function buildVersionItem(domain, version, isActive, pagePath = '') {
+  const item = document.createElement('div');
+  item.className = `version-item${isActive ? ' is-active' : ''}`;
+
+  const metaParts = [formatDate(version.timestamp)];
+  if (version.provider || version.model) {
+    metaParts.push(`${version.provider || '?'} / ${version.model || '?'}`);
+  }
+
+  item.innerHTML = `
+    <div class="version-row">
+      <div class="version-meta">
+        <span class="version-badge${isActive ? ' active' : ''}">${isActive ? 'Active' : 'Version'}</span>
+        <span>${escapeHtml(metaParts.join(' · '))}</span>
+      </div>
+      <div class="version-actions"></div>
+    </div>
+    <pre class="version-preview">${escapeHtml(previewCss(version.css))}</pre>
+  `;
+
+  const actionsWrap = item.querySelector('.version-actions');
+  if (!isActive) {
+    const activateBtn = document.createElement('button');
+    activateBtn.type = 'button';
+    activateBtn.className = 'btn-sm';
+    activateBtn.textContent = 'Activate';
+    activateBtn.addEventListener('click', () => activateVersion(domain, version.id, pagePath));
+    actionsWrap.appendChild(activateBtn);
+  }
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'btn-sm warn';
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.addEventListener('click', () => deleteVersion(domain, version.id, pagePath));
+  actionsWrap.appendChild(deleteBtn);
+
+  return item;
+}
+
+async function activateVersion(domain, versionId, pagePath = '') {
+  const entry = sitesState.styles[domain];
+  if (!isObject(entry)) return;
+
+  if (pagePath) {
+    const pageEntry = entry.pages?.[pagePath];
+    if (!isObject(pageEntry)) return;
+    pageEntry.activeVersionId = versionId;
+  } else {
+    entry.activeVersionId = versionId;
+  }
+
+  await persistSitesStyles();
+  renderSites();
+}
+
+async function deleteVersion(domain, versionId, pagePath = '') {
+  const entry = sitesState.styles[domain];
+  if (!isObject(entry)) return;
+
+  if (pagePath) {
+    const pageEntry = entry.pages?.[pagePath];
+    if (!isObject(pageEntry) || !Array.isArray(pageEntry.versions)) return;
+    pageEntry.versions = pageEntry.versions.filter((v) => v.id !== versionId);
+    if (pageEntry.activeVersionId === versionId) {
+      pageEntry.activeVersionId = pageEntry.versions[0]?.id || null;
+    }
+    if (pageEntry.versions.length === 0) {
+      delete entry.pages[pagePath];
+    }
+  } else {
+    if (!Array.isArray(entry.versions)) return;
+    entry.versions = entry.versions.filter((v) => v.id !== versionId);
+    if (entry.activeVersionId === versionId) {
+      entry.activeVersionId = entry.versions[0]?.id || null;
+    }
+  }
+
+  const noVersions = !Array.isArray(entry.versions) || entry.versions.length === 0;
+  const noPages = !isObject(entry.pages) || Object.keys(entry.pages).length === 0;
+  if (noVersions && noPages) {
+    delete sitesState.styles[domain];
+    sitesState.expandedDomains.delete(domain);
+  }
+
+  await persistSitesStyles();
+  renderSites();
+}
+
+async function deleteDomain(domain) {
+  delete sitesState.styles[domain];
+  sitesState.expandedDomains.delete(domain);
+  await persistSitesStyles();
+  renderSites();
+}
+
+async function persistSitesStyles() {
+  await chrome.storage.local.set({ [STYLE_STORAGE_KEY]: sitesState.styles });
+}
+
+// ─── Debug ───
+
+async function initDebugUI() {
+  const debugToggle = $('#debug-toggle');
+  const logViewerWrap = $('#log-viewer-wrap');
+  const logViewer = $('#log-viewer');
+  const logCountEl = $('#log-count');
+  const refreshBtn = $('#refresh-logs-btn');
+  const clearBtn = $('#clear-logs-btn');
+
+  const enabled = await getLoggingEnabled();
+  debugToggle.checked = enabled;
+  logViewerWrap.style.display = enabled ? '' : 'none';
+
+  if (enabled) renderLogs();
+
+  debugToggle.addEventListener('change', async () => {
+    const on = debugToggle.checked;
+    await setLogging(on);
+    logViewerWrap.style.display = on ? '' : 'none';
+    if (on) renderLogs();
+  });
+
+  refreshBtn.addEventListener('click', renderLogs);
+
+  clearBtn.addEventListener('click', async () => {
+    await clearLogs();
+    renderLogs();
+  });
+
+  async function renderLogs() {
+    const logs = await getLogs();
+    logCountEl.textContent = `${logs.length} entries`;
+
+    if (logs.length === 0) {
+      logViewer.innerHTML = '<div class="log-empty">No logs yet</div>';
+      return;
+    }
+
+    const html = logs
+      .slice()
+      .reverse()
+      .map((entry) => {
+        const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '';
+        const dataHtml = entry.data
+          ? `<div class="log-data">${escapeHtml(entry.data)}</div>`
+          : '';
+        return `<div class="log-entry">
+          <span class="log-ts">${ts}</span>
+          <span class="log-level ${entry.level || ''}">${escapeHtml(entry.level || '')}</span>
+          <span class="log-source">[${escapeHtml(entry.source || '')}]</span>
+          <span class="log-msg">${escapeHtml(entry.message || '')}</span>
+          ${dataHtml}
+        </div>`;
+      })
+      .join('');
+
+    logViewer.innerHTML = html;
+  }
+}
+
+// ─── Init ───
+
 async function init() {
   try {
     const { llmSettings } = await chrome.storage.local.get('llmSettings');
@@ -477,66 +818,12 @@ async function init() {
     card.querySelector('.prompt-name-input').focus();
   });
 
+  document.querySelectorAll('.nav-tab').forEach((tab) => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  switchTab('providers');
   initDebugUI();
-}
-
-async function initDebugUI() {
-  const debugToggle = $('#debug-toggle');
-  const logViewerWrap = $('#log-viewer-wrap');
-  const logViewer = $('#log-viewer');
-  const logCount = $('#log-count');
-  const refreshBtn = $('#refresh-logs-btn');
-  const clearBtn = $('#clear-logs-btn');
-
-  const enabled = await getLoggingEnabled();
-  debugToggle.checked = enabled;
-  logViewerWrap.style.display = enabled ? '' : 'none';
-
-  if (enabled) renderLogs();
-
-  debugToggle.addEventListener('change', async () => {
-    const on = debugToggle.checked;
-    await setLogging(on);
-    logViewerWrap.style.display = on ? '' : 'none';
-    if (on) renderLogs();
-  });
-
-  refreshBtn.addEventListener('click', renderLogs);
-
-  clearBtn.addEventListener('click', async () => {
-    await clearLogs();
-    renderLogs();
-  });
-
-  async function renderLogs() {
-    const logs = await getLogs();
-    logCount.textContent = `${logs.length} entries`;
-
-    if (logs.length === 0) {
-      logViewer.innerHTML = '<div class="log-empty">No logs yet</div>';
-      return;
-    }
-
-    const html = logs
-      .slice()
-      .reverse()
-      .map((entry) => {
-        const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '';
-        const dataHtml = entry.data
-          ? `<div class="log-data">${escapeHtml(entry.data)}</div>`
-          : '';
-        return `<div class="log-entry">
-          <span class="log-ts">${ts}</span>
-          <span class="log-level ${entry.level || ''}">${escapeHtml(entry.level || '')}</span>
-          <span class="log-source">[${escapeHtml(entry.source || '')}]</span>
-          <span class="log-msg">${escapeHtml(entry.message || '')}</span>
-          ${dataHtml}
-        </div>`;
-      })
-      .join('');
-
-    logViewer.innerHTML = html;
-  }
 }
 
 init();

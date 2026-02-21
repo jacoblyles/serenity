@@ -138,3 +138,6 @@
 {"type":"status_update","timestamp":"2026-02-21T02:07:04.435466Z","issue_id":"darkside2-fde","payload":{"status":"in_progress"}}
 {"type":"close","timestamp":"2026-02-21T02:09:22.58926Z","issue_id":"darkside2-fde","payload":{}}
 {"type":"close","timestamp":"2026-02-21T02:11:12.190772Z","issue_id":"darkside2-381","payload":{}}
+{"type":"close","timestamp":"2026-02-21T02:44:43.895547Z","issue_id":"darkside2-fde","payload":{}}
+{"type":"close","timestamp":"2026-02-21T02:44:43.895547Z","issue_id":"darkside2-381","payload":{}}
+{"type":"close","timestamp":"2026-02-21T02:44:43.895547Z","issue_id":"darkside2-f8b","payload":{}}
