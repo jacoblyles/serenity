@@ -495,6 +495,29 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     }
   }
 
+  let customPropertyContext = null;
+  try {
+    customPropertyContext = await sendMessageToTabWithInjection(tabId, {
+      type: 'extract-custom-properties',
+    });
+  } catch (_error) {
+    customPropertyContext = null;
+  }
+
+  const hasCustomProperties = Boolean(
+    isObject(customPropertyContext?.properties)
+    && Object.keys(customPropertyContext.properties).length > 0
+  );
+  if (hasCustomProperties) {
+    pageContext = {
+      ...pageContext,
+      customProperties: customPropertyContext,
+    };
+    log.info('generate', 'Extracted custom properties for prompt context', {
+      propertyCount: Object.keys(customPropertyContext.properties).length,
+    });
+  }
+
   const activePrompts = await getActivePrompts();
   log.info('generate', 'Using prompts', { custom: Boolean(activePrompts.system || activePrompts.user) });
   const screenshotDataUrl = sanitizeGenerationScreenshotDataUrl(options.screenshotDataUrl);
@@ -536,7 +559,7 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     model: typeof options.model === 'string' ? options.model : undefined,
     temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
     maxTokens: typeof options.maxTokens === 'number' ? options.maxTokens : 3200,
-    systemPrompt: activePrompts.system || buildDarkModeSystemPrompt(),
+    systemPrompt: buildGenerationSystemPrompt(activePrompts.system, hasCustomProperties),
     messages: [
       {
         role: 'user',
@@ -725,6 +748,14 @@ function buildDarkModeSystemPrompt() {
     'Maintain accessible contrast across base text, muted text, and interactive states.',
     'Prefer scoped overrides on common selectors and avoid !important unless necessary.',
   ].join(' ');
+}
+
+function buildGenerationSystemPrompt(activeSystemPrompt, hasCustomProperties) {
+  const customPropertyGuidance = 'This site uses CSS custom properties for theming. Prefer overriding these variables on :root rather than targeting individual elements.';
+  const basePrompt = activeSystemPrompt || buildDarkModeSystemPrompt();
+  if (!hasCustomProperties) return basePrompt;
+  if (basePrompt.includes(customPropertyGuidance)) return basePrompt;
+  return `${basePrompt} ${customPropertyGuidance}`;
 }
 
 function buildRefineSystemPrompt() {
@@ -1029,6 +1060,43 @@ function sanitizePageContext(pageContext) {
     nodeCount: Number.isFinite(pageContext.nodeCount) ? pageContext.nodeCount : 0,
     truncated: Boolean(pageContext.truncated),
     dom: pageContext.dom || null,
+    customProperties: sanitizeCustomPropertiesContext(pageContext.customProperties),
+  };
+}
+
+function sanitizeCustomPropertiesContext(customProperties) {
+  if (!isObject(customProperties) || !isObject(customProperties.properties)) {
+    return null;
+  }
+
+  const sanitizedProperties = {};
+  for (const [name, value] of Object.entries(customProperties.properties)) {
+    if (typeof name !== 'string' || !name.startsWith('--')) continue;
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    sanitizedProperties[name] = trimmed.slice(0, 120);
+  }
+
+  const sanitizedGrouped = {};
+  const groupKeys = ['backgrounds', 'text', 'accents', 'borders'];
+  for (const key of groupKeys) {
+    if (!Array.isArray(customProperties.grouped?.[key])) {
+      sanitizedGrouped[key] = [];
+      continue;
+    }
+    sanitizedGrouped[key] = customProperties.grouped[key]
+      .filter((name) => typeof name === 'string' && name.startsWith('--'))
+      .slice(0, 80);
+  }
+
+  if (Object.keys(sanitizedProperties).length === 0) {
+    return null;
+  }
+
+  return {
+    properties: sanitizedProperties,
+    grouped: sanitizedGrouped,
   };
 }
 

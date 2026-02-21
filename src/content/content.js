@@ -73,6 +73,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'remove-css': () => { removeCSS(); return { removed: true }; },
     'get-applied-css': () => ({ css: getInjectedCSS() }),
     'extract-dom': () => extractDOM(),
+    'extract-custom-properties': () => extractCustomProperties(),
     'detect-dark-mode': () => detectExistingDarkMode(),
     'extract-dark-mode-rules': () => ({ css: extractPrefersDarkModeCss() }),
   };
@@ -221,6 +222,196 @@ function extractDOM() {
   return {
     ...result,
   };
+}
+
+function extractCustomProperties() {
+  const properties = new Map();
+  const rootComputed = getComputedStyle(document.documentElement);
+
+  for (let i = 0; i < rootComputed.length; i += 1) {
+    const propertyName = rootComputed[i];
+    if (!propertyName || !propertyName.startsWith('--')) continue;
+    const value = rootComputed.getPropertyValue(propertyName).trim();
+    if (!value) continue;
+    properties.set(propertyName, value);
+  }
+
+  for (const [name, value] of getRootRuleCustomPropertiesFromStylesheets()) {
+    if (!properties.has(name) && value) {
+      properties.set(name, value);
+    }
+  }
+
+  const grouped = groupCustomProperties(properties);
+
+  return {
+    properties: Object.fromEntries(properties),
+    grouped,
+  };
+}
+
+function getRootRuleCustomPropertiesFromStylesheets() {
+  const collected = new Map();
+  const visited = new Set();
+
+  function collectFromRules(rules) {
+    if (!rules) return;
+    for (const rule of rules) {
+      if (!rule) continue;
+      if (rule.type === CSSRule.STYLE_RULE) {
+        const selector = rule.selectorText || '';
+        if (selectorTargetsRoot(selector)) {
+          for (let i = 0; i < rule.style.length; i += 1) {
+            const name = rule.style[i];
+            if (!name || !name.startsWith('--')) continue;
+            const value = rule.style.getPropertyValue(name).trim();
+            if (value && !collected.has(name)) {
+              collected.set(name, value);
+            }
+          }
+        }
+        continue;
+      }
+
+      if (
+        rule.type === CSSRule.MEDIA_RULE
+        || rule.type === CSSRule.SUPPORTS_RULE
+      ) {
+        collectFromRules(rule.cssRules);
+        continue;
+      }
+
+      if (rule.type === CSSRule.IMPORT_RULE && rule.styleSheet) {
+        collectFromSheet(rule.styleSheet);
+      }
+    }
+  }
+
+  function collectFromSheet(sheet) {
+    if (!sheet || visited.has(sheet)) return;
+    visited.add(sheet);
+    try {
+      collectFromRules(sheet.cssRules || sheet.rules);
+    } catch {
+      // Ignore cross-origin or restricted stylesheets.
+    }
+  }
+
+  for (const sheet of document.styleSheets) {
+    collectFromSheet(sheet);
+  }
+
+  return collected;
+}
+
+function selectorTargetsRoot(selectorText) {
+  if (!selectorText) return false;
+  const selectors = selectorText
+    .split(',')
+    .map((selector) => selector.trim())
+    .filter(Boolean);
+  return selectors.some((selector) => /(^|[\s>+~])(:root|html)\b/.test(selector));
+}
+
+function groupCustomProperties(properties) {
+  const grouped = {
+    backgrounds: new Set(),
+    text: new Set(),
+    accents: new Set(),
+    borders: new Set(),
+  };
+
+  for (const [name, value] of properties.entries()) {
+    const lowerName = name.toLowerCase();
+    const colorInfo = parseColorInfo(value);
+    const isLight = colorInfo && colorInfo.alpha > 0 && colorInfo.luminance >= 0.72;
+    const isDark = colorInfo && colorInfo.alpha > 0 && colorInfo.luminance <= 0.38;
+
+    if (
+      /(?:^|[-_])(bg|background|surface|base)(?:[-_]|$)/.test(lowerName)
+      || isLight
+    ) {
+      grouped.backgrounds.add(name);
+    }
+
+    if (
+      /(?:^|[-_])(accent|primary|secondary|link|brand)(?:[-_]|$)/.test(lowerName)
+    ) {
+      grouped.accents.add(name);
+    }
+
+    if (
+      /(?:^|[-_])(border|divider|separator)(?:[-_]|$)/.test(lowerName)
+    ) {
+      grouped.borders.add(name);
+    }
+
+    const containsColorKeyword = lowerName.includes('color');
+    const isBackgroundColorName = lowerName.includes('background-color');
+    if (
+      /(?:^|[-_])(text|foreground|fg)(?:[-_]|$)/.test(lowerName)
+      || ((containsColorKeyword && !isBackgroundColorName) && isDark)
+    ) {
+      grouped.text.add(name);
+    }
+  }
+
+  return {
+    backgrounds: Array.from(grouped.backgrounds),
+    text: Array.from(grouped.text),
+    accents: Array.from(grouped.accents),
+    borders: Array.from(grouped.borders),
+  };
+}
+
+function parseColorInfo(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed || trimmed === 'transparent') return null;
+
+  const hexMatch = trimmed.match(/^#([0-9a-f]{3,8})\b/i);
+  if (hexMatch) {
+    return parseHexColor(hexMatch[1]);
+  }
+
+  const rgbMatch = trimmed.match(/^rgba?\(([^)]+)\)/i);
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(',').map((part) => part.trim());
+    if (parts.length < 3) return null;
+    const r = parseFloat(parts[0]);
+    const g = parseFloat(parts[1]);
+    const b = parseFloat(parts[2]);
+    const alpha = parts[3] === undefined ? 1 : parseFloat(parts[3]);
+    if ([r, g, b, alpha].some((n) => Number.isNaN(n))) return null;
+    const luminance = computeLuminance(r, g, b);
+    return { luminance, alpha };
+  }
+
+  return null;
+}
+
+function parseHexColor(hex) {
+  const normalized = hex.toLowerCase();
+  if (![3, 4, 6, 8].includes(normalized.length)) return null;
+
+  const expanded = normalized.length <= 4
+    ? normalized.split('').map((ch) => ch + ch).join('')
+    : normalized;
+  const hasAlpha = expanded.length === 8;
+  const r = parseInt(expanded.slice(0, 2), 16);
+  const g = parseInt(expanded.slice(2, 4), 16);
+  const b = parseInt(expanded.slice(4, 6), 16);
+  const alpha = hasAlpha ? parseInt(expanded.slice(6, 8), 16) / 255 : 1;
+  if ([r, g, b, alpha].some((n) => Number.isNaN(n))) return null;
+  const luminance = computeLuminance(r, g, b);
+  return { luminance, alpha };
+}
+
+function computeLuminance(r255, g255, b255) {
+  const r = r255 / 255;
+  const g = g255 / 255;
+  const b = b255 / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 function detectExistingDarkMode() {
