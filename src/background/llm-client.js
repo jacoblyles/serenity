@@ -1,5 +1,13 @@
 import { PROVIDER_CONFIG, isHttpsUrl, mergeLlmSettings } from '../shared/llm-settings.js';
 import { resolveOAuth, validateOAuth, getOAuthHeaders } from './oauth.js';
+import {
+  toOpenAiTools,
+  toAnthropicTools,
+  toGoogleTools,
+  parseOpenAiToolCalls,
+  parseAnthropicToolCalls,
+  parseGoogleToolCalls,
+} from './llm-tools.js';
 
 function normalizeMessages(messages, systemPrompt) {
   const normalized = [];
@@ -30,6 +38,33 @@ function normalizeMessageContent(content) {
 
     if (part.type === 'text' && typeof part.text === 'string' && part.text) {
       normalizedParts.push({ type: 'text', text: part.text });
+      continue;
+    }
+
+    if (
+      part.type === 'tool_result' &&
+      typeof part.tool_use_id === 'string' &&
+      typeof part.content === 'string'
+    ) {
+      normalizedParts.push({
+        type: 'tool_result',
+        tool_use_id: part.tool_use_id,
+        content: part.content,
+      });
+      continue;
+    }
+
+    if (
+      part.functionResponse &&
+      typeof part.functionResponse === 'object' &&
+      typeof part.functionResponse.name === 'string'
+    ) {
+      normalizedParts.push({
+        functionResponse: {
+          name: part.functionResponse.name,
+          response: part.functionResponse.response,
+        },
+      });
       continue;
     }
 
@@ -148,11 +183,13 @@ async function requestOpenAiLikeCompletion({
   temperature,
   maxTokens,
   headers = {},
+  tools,
 }) {
   const normalizedMessages = messages.map((message) => ({
     role: message.role,
     content: convertToOpenAiContent(message.content),
   }));
+  const parsedTools = toOpenAiTools(tools);
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -166,18 +203,20 @@ async function requestOpenAiLikeCompletion({
       messages: normalizedMessages,
       ...(typeof temperature === 'number' ? { temperature } : {}),
       ...(typeof maxTokens === 'number' ? { max_tokens: maxTokens } : {}),
+      ...(parsedTools.length ? { tools: parsedTools } : {}),
     }),
   });
 
   if (!response.ok) await parseErrorResponse(response);
   const data = await response.json();
-  const text = data?.choices?.[0]?.message?.content || '';
+  const text = extractOpenAiText(data?.choices?.[0]?.message?.content);
+  const toolCalls = parseOpenAiToolCalls(data);
 
-  if (!text) {
+  if (!text && !toolCalls.length) {
     throw new Error('No text returned from provider');
   }
 
-  return { text, raw: data };
+  return { text, toolCalls, raw: data };
 }
 
 async function requestAnthropicCompletion({
@@ -187,8 +226,10 @@ async function requestAnthropicCompletion({
   messages,
   temperature,
   maxTokens,
+  tools,
 }) {
   const system = messages.find((msg) => msg.role === 'system')?.content || '';
+  const providerTools = toAnthropicTools(tools);
   const conversationalMessages = messages
     .filter((msg) => msg.role !== 'system')
     .map((msg) => ({
@@ -210,6 +251,7 @@ async function requestAnthropicCompletion({
       ...(typeof temperature === 'number' ? { temperature } : {}),
       ...(system ? { system } : {}),
       messages: conversationalMessages,
+      ...(providerTools.length ? { tools: providerTools } : {}),
     }),
   });
 
@@ -220,12 +262,13 @@ async function requestAnthropicCompletion({
     .map((part) => part.text)
     .join('\n')
     .trim();
+  const toolCalls = parseAnthropicToolCalls(data);
 
-  if (!text) {
+  if (!text && !toolCalls.length) {
     throw new Error('No text returned from provider');
   }
 
-  return { text, raw: data };
+  return { text, toolCalls, raw: data };
 }
 
 async function requestGoogleCompletion({
@@ -235,9 +278,11 @@ async function requestGoogleCompletion({
   messages,
   temperature,
   maxTokens,
+  tools,
 }) {
   const system = messages.find((msg) => msg.role === 'system')?.content || '';
   const promptMessages = messages.filter((msg) => msg.role !== 'system');
+  const providerTools = toGoogleTools(tools);
   const url = `${endpoint}/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(url, {
     method: 'POST',
@@ -257,6 +302,7 @@ async function requestGoogleCompletion({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: convertToGoogleParts(msg.content),
       })),
+      ...(providerTools.length ? { tools: providerTools } : {}),
       generationConfig: {
         ...(typeof temperature === 'number' ? { temperature } : {}),
         ...(typeof maxTokens === 'number' ? { maxOutputTokens: maxTokens } : {}),
@@ -271,25 +317,45 @@ async function requestGoogleCompletion({
     .filter(Boolean)
     .join('\n')
     .trim();
+  const toolCalls = parseGoogleToolCalls(data);
 
-  if (!text) {
+  if (!text && !toolCalls.length) {
     throw new Error('No text returned from provider');
   }
 
-  return { text, raw: data };
+  return { text, toolCalls, raw: data };
 }
 
 function convertToOpenAiContent(content) {
   if (typeof content === 'string') return content;
-  return content.map((part) => {
+  const parts = [];
+
+  for (const part of content) {
     if (part.type === 'text') {
-      return { type: 'text', text: part.text };
+      parts.push({ type: 'text', text: part.text });
+      continue;
     }
-    return {
-      type: 'image_url',
-      image_url: { url: part.image_url.url },
-    };
-  });
+
+    if (part.type === 'image_url') {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: part.image_url.url },
+      });
+    }
+  }
+
+  return parts;
+}
+
+function extractOpenAiText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  return content
+    .map((part) => (part?.type === 'text' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
 }
 
 function convertToAnthropicContent(content) {
@@ -312,6 +378,19 @@ function convertToAnthropicContent(content) {
           media_type: parsed.mimeType,
           data: parsed.base64Data,
         },
+      });
+      continue;
+    }
+
+    if (
+      part.type === 'tool_result' &&
+      typeof part.tool_use_id === 'string' &&
+      typeof part.content === 'string'
+    ) {
+      parts.push({
+        type: 'tool_result',
+        tool_use_id: part.tool_use_id,
+        content: part.content,
       });
     }
   }
@@ -336,6 +415,20 @@ function convertToGoogleParts(content) {
         inlineData: {
           mimeType: parsed.mimeType,
           data: parsed.base64Data,
+        },
+      });
+      continue;
+    }
+
+    if (
+      part.functionResponse &&
+      typeof part.functionResponse === 'object' &&
+      typeof part.functionResponse.name === 'string'
+    ) {
+      parts.push({
+        functionResponse: {
+          name: part.functionResponse.name,
+          response: part.functionResponse.response,
         },
       });
     }
@@ -389,6 +482,7 @@ export async function completeLlmRequest(request = {}) {
           messages,
           temperature: request.temperature,
           maxTokens: request.maxTokens,
+          tools: request.tools,
         })),
       };
     case 'anthropic':
@@ -402,6 +496,7 @@ export async function completeLlmRequest(request = {}) {
           messages,
           temperature: request.temperature,
           maxTokens: request.maxTokens,
+          tools: request.tools,
         })),
       };
     case 'google':
@@ -415,6 +510,7 @@ export async function completeLlmRequest(request = {}) {
           messages,
           temperature: request.temperature,
           maxTokens: request.maxTokens,
+          tools: request.tools,
         })),
       };
     case 'xai':
@@ -428,6 +524,7 @@ export async function completeLlmRequest(request = {}) {
           messages,
           temperature: request.temperature,
           maxTokens: request.maxTokens,
+          tools: request.tools,
         })),
       };
     case 'custom':
@@ -442,6 +539,7 @@ export async function completeLlmRequest(request = {}) {
           temperature: request.temperature,
           maxTokens: request.maxTokens,
           headers,
+          tools: request.tools,
         })),
       };
     default:
