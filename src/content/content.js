@@ -74,6 +74,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'get-applied-css': () => ({ css: getInjectedCSS() }),
     'extract-dom': () => extractDOM(),
     'detect-dark-mode': () => detectExistingDarkMode(),
+    'extract-dark-mode-rules': () => ({ css: extractPrefersDarkModeCss() }),
   };
 
   const handler = handlers[message.type];
@@ -291,6 +292,50 @@ function hasDarkMediaRule(sheet) {
     }
   }
   return false;
+}
+
+function extractPrefersDarkModeCss() {
+  const extractedRules = [];
+
+  function walkRules(ruleList) {
+    if (!ruleList) return;
+
+    for (const rule of ruleList) {
+      if (rule.type === CSSRule.MEDIA_RULE && isPrefersDarkMediaRule(rule)) {
+        if (rule.cssRules && rule.cssRules.length > 0) {
+          extractedRules.push(cssRuleListToText(rule.cssRules));
+        }
+        continue;
+      }
+
+      if ('cssRules' in rule && rule.cssRules?.length) {
+        walkRules(rule.cssRules);
+      }
+    }
+  }
+
+  for (const sheet of document.styleSheets) {
+    try {
+      walkRules(sheet.cssRules || sheet.rules);
+    } catch {
+      // Cross-origin stylesheets cannot be read.
+    }
+  }
+
+  return extractedRules.filter(Boolean).join('\n\n').trim();
+}
+
+function isPrefersDarkMediaRule(rule) {
+  const conditionText = String(rule.conditionText || '');
+  if (/prefers-color-scheme\s*:\s*dark/i.test(conditionText)) return true;
+  return Boolean(rule.media?.mediaText && /prefers-color-scheme\s*:\s*dark/i.test(rule.media.mediaText));
+}
+
+function cssRuleListToText(ruleList) {
+  return Array.from(ruleList)
+    .map((cssRule) => cssRule.cssText)
+    .filter(Boolean)
+    .join('\n');
 }
 
 function parseLuminance(bgColor) {

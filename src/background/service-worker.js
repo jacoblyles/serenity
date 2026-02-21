@@ -15,6 +15,7 @@ const MAX_FEEDBACK_IMAGES = 3;
 const MAX_FEEDBACK_IMAGE_BYTES = 1000000;
 const MAX_FEEDBACK_IMAGE_NAME_LENGTH = 80;
 const MAX_GENERATION_SCREENSHOT_DATA_URL_LENGTH = 1_200_000;
+const NATIVE_DARK_MODE_DIRECT_APPLY_MIN_BYTES = 500;
 const MAX_CONTEXT_DOM_NODES = 260;
 const MAX_CONTEXT_DOM_DEPTH = 5;
 const MAX_CONTEXT_DOM_CHILDREN = 14;
@@ -463,19 +464,64 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     return { css: null, error: await getContentScriptUnavailableError(tabId) };
   }
 
+  let extractedNativeDarkCss = '';
+  try {
+    const extracted = await sendMessageToTabWithInjection(tabId, { type: 'extract-dark-mode-rules' });
+    extractedNativeDarkCss = typeof extracted?.css === 'string' ? extracted.css.trim() : '';
+  } catch {
+    extractedNativeDarkCss = '';
+  }
+
+  const extractedNativeDarkCssBytes = getUtf8ByteLength(extractedNativeDarkCss);
+  if (extractedNativeDarkCssBytes > NATIVE_DARK_MODE_DIRECT_APPLY_MIN_BYTES) {
+    try {
+      await sendMessageToTabWithInjection(tabId, { type: 'apply-css', css: extractedNativeDarkCss });
+      log.info('generate', 'Applied native prefers-color-scheme dark CSS directly', {
+        tabId,
+        cssBytes: extractedNativeDarkCssBytes,
+      });
+      return {
+        css: extractedNativeDarkCss,
+        applied: true,
+        provider: null,
+        model: null,
+        usedNativeDarkModeCss: true,
+        nativeDarkCssBytes: extractedNativeDarkCssBytes,
+        truncatedContext: Boolean(pageContext?.truncated),
+        nodeCount: pageContext?.nodeCount || 0,
+      };
+    } catch {
+      log.warn('generate', 'Failed to apply extracted native dark CSS; falling back to LLM flow');
+    }
+  }
+
   const activePrompts = await getActivePrompts();
   log.info('generate', 'Using prompts', { custom: Boolean(activePrompts.system || activePrompts.user) });
   const screenshotDataUrl = sanitizeGenerationScreenshotDataUrl(options.screenshotDataUrl);
   const contextJson = buildContextJsonForPrompt(pageContext, {
     withScreenshot: Boolean(screenshotDataUrl),
   });
+  const shouldPassPartialNativeDarkCssToLlm =
+    extractedNativeDarkCssBytes > 0 &&
+    extractedNativeDarkCssBytes < NATIVE_DARK_MODE_DIRECT_APPLY_MIN_BYTES;
   let userContent;
   if (activePrompts.user) {
     userContent = activePrompts.user.includes('{{context}}')
       ? activePrompts.user.replace('{{context}}', contextJson)
       : `${activePrompts.user}\n\nPage context JSON:\n${contextJson}`;
   } else {
-    userContent = buildDarkModeUserPrompt(pageContext);
+    userContent = buildDarkModeUserPrompt(pageContext, {
+      extractedNativeDarkCss: shouldPassPartialNativeDarkCssToLlm ? extractedNativeDarkCss : '',
+      extractedNativeDarkCssBytes,
+    });
+  }
+  if (shouldPassPartialNativeDarkCssToLlm && activePrompts.user) {
+    userContent = [
+      userContent,
+      'Additional context: the site already provides partial prefers-color-scheme: dark rules.',
+      `Extracted native dark CSS (${extractedNativeDarkCssBytes} bytes):`,
+      extractedNativeDarkCss,
+    ].join('\n\n');
   }
 
   const userMessageContent = screenshotDataUrl
@@ -537,6 +583,8 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
     applied: true,
     provider: llmResult.provider,
     model: llmResult.model,
+    usedNativeDarkModeCss: false,
+    nativeDarkCssBytes: extractedNativeDarkCssBytes,
     truncatedContext: Boolean(pageContext?.truncated),
     nodeCount: pageContext?.nodeCount || 0,
   };
@@ -690,14 +738,21 @@ function buildRefineSystemPrompt() {
   ].join(' ');
 }
 
-function buildDarkModeUserPrompt(pageContext) {
+function buildDarkModeUserPrompt(
+  pageContext,
+  { extractedNativeDarkCss = '', extractedNativeDarkCssBytes = 0 } = {}
+) {
   const safeContext = sanitizePageContext(pageContext);
   const contextJson = buildContextJsonForPrompt(safeContext, { withScreenshot: false });
+  const hasPartialNativeDarkCss =
+    typeof extractedNativeDarkCss === 'string' &&
+    extractedNativeDarkCssBytes > 0 &&
+    extractedNativeDarkCssBytes < NATIVE_DARK_MODE_DIRECT_APPLY_MIN_BYTES;
   const truncatedHint = safeContext.truncated
     ? 'Context is truncated. Prioritize robust selectors that cover main content, sidebars, discussion threads, editor textareas, preview regions, and quoted blocks.'
     : 'Context is complete enough to target specific components and states.';
 
-  return [
+  const sections = [
     'Create CSS that applies a visually pleasing dark theme to this page context.',
     'Goals:',
     '- Darken page backgrounds while preserving hierarchy.',
@@ -709,9 +764,18 @@ function buildDarkModeUserPrompt(pageContext) {
     '- Do not hide content or change spacing/layout dramatically.',
     'Context guidance:',
     `- ${truncatedHint}`,
-    'Page context JSON:',
-    contextJson,
-  ].join('\n');
+  ];
+
+  if (hasPartialNativeDarkCss) {
+    sections.push(
+      '- The site already includes partial native dark mode rules via prefers-color-scheme. Reuse and extend these patterns instead of replacing them wholesale.',
+      `Extracted native dark CSS (${extractedNativeDarkCssBytes} bytes):`,
+      extractedNativeDarkCss
+    );
+  }
+
+  sections.push('Page context JSON:', contextJson);
+  return sections.join('\n');
 }
 
 function buildRefineUserPrompt({ pageContext, currentCss, feedback, feedbackImages }) {
@@ -988,4 +1052,9 @@ function extractCssFromModelText(text) {
 
 function looksLikeCss(text) {
   return /[.#:]?[a-zA-Z][a-zA-Z0-9_:\-#.*\s>,+~[\]="'()]*\{[^{}]*\}/.test(text);
+}
+
+function getUtf8ByteLength(text) {
+  if (typeof text !== 'string' || !text) return 0;
+  return new TextEncoder().encode(text).length;
 }
