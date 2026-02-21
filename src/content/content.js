@@ -46,6 +46,8 @@ const STYLE_PROPERTIES = [
   'caretColor',
   'textDecorationColor',
 ];
+const MAX_COLOR_MAP_ENTRIES = 200;
+const MAX_COLOR_MAP_SELECTORS_PER_ENTRY = 4;
 
 function injectCSS(css) {
   let el = document.getElementById(STYLE_ELEMENT_ID);
@@ -74,6 +76,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'get-applied-css': () => ({ css: getInjectedCSS() }),
     'extract-dom': () => extractDOM(),
     'extract-custom-properties': () => extractCustomProperties(),
+    'extract-color-map': () => extractColorMap(),
     'detect-dark-mode': () => detectExistingDarkMode(),
     'extract-dark-mode-rules': () => ({ css: extractPrefersDarkModeCss() }),
   };
@@ -535,4 +538,207 @@ function parseLuminance(bgColor) {
   if (!match) return null;
   const [r, g, b] = [+match[1] / 255, +match[2] / 255, +match[3] / 255];
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function extractColorMap() {
+  const allElements = Array.from(document.querySelectorAll('*'));
+  const profileMap = new Map();
+
+  for (const el of allElements) {
+    if (!isVisibleForColorMap(el)) continue;
+
+    const style = window.getComputedStyle(el);
+    const profile = {
+      color: normalizeColorValue(style.color),
+      bg: normalizeColorValue(style.backgroundColor),
+      border: normalizeColorValue(style.borderColor),
+      borderTop: normalizeColorValue(style.borderTopColor),
+      borderBottom: normalizeColorValue(style.borderBottomColor),
+      borderLeft: normalizeColorValue(style.borderLeftColor),
+      borderRight: normalizeColorValue(style.borderRightColor),
+      fill: normalizeColorValue(style.fill),
+      stroke: normalizeColorValue(style.stroke),
+    };
+
+    const key = JSON.stringify(profile);
+    const selector = buildCompactSelector(el);
+    const existing = profileMap.get(key);
+    if (existing) {
+      existing.count += 1;
+      if (existing.selectors.size < MAX_COLOR_MAP_SELECTORS_PER_ENTRY) {
+        existing.selectors.add(selector);
+      }
+    } else {
+      profileMap.set(key, {
+        profile,
+        selectors: new Set([selector]),
+        count: 1,
+      });
+    }
+  }
+
+  const sortedProfiles = Array.from(profileMap.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, MAX_COLOR_MAP_ENTRIES);
+
+  const uniqueBackgrounds = new Set();
+  const uniqueText = new Set();
+  const uniqueBorders = new Set();
+
+  const colorMap = sortedProfiles.map((entry) => {
+    const selectors = Array.from(entry.selectors).sort();
+    const item = {
+      selector: selectors.join(', '),
+    };
+
+    if (isMeaningfulColor(entry.profile.bg)) {
+      item.bg = entry.profile.bg;
+      uniqueBackgrounds.add(entry.profile.bg);
+    }
+    if (isMeaningfulColor(entry.profile.color)) {
+      item.color = entry.profile.color;
+      uniqueText.add(entry.profile.color);
+    }
+
+    const borderValue = deriveBorderValue(entry.profile);
+    if (borderValue) {
+      item.border = borderValue;
+      if (typeof borderValue === 'string') {
+        uniqueBorders.add(borderValue);
+      } else {
+        for (const value of Object.values(borderValue)) {
+          if (isMeaningfulColor(value)) uniqueBorders.add(value);
+        }
+      }
+    }
+
+    if (isMeaningfulColor(entry.profile.fill)) {
+      item.fill = entry.profile.fill;
+    }
+    if (isMeaningfulColor(entry.profile.stroke)) {
+      item.stroke = entry.profile.stroke;
+    }
+
+    return item;
+  });
+
+  return {
+    colorMap,
+    uniqueColors: {
+      backgrounds: Array.from(uniqueBackgrounds).sort(),
+      text: Array.from(uniqueText).sort(),
+      borders: Array.from(uniqueBorders).sort(),
+    },
+  };
+}
+
+function isVisibleForColorMap(el) {
+  if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+  if (SKIP_TAGS.has(el.tagName)) return false;
+
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+  const rect = el.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+
+  return true;
+}
+
+function normalizeColorValue(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+}
+
+function isMeaningfulColor(value) {
+  if (typeof value !== 'string') return false;
+  if (!value) return false;
+  if (value === 'transparent' || value === 'rgba(0, 0, 0, 0)') return false;
+  if (value === 'initial' || value === 'inherit' || value === 'unset') return false;
+  if (value === 'none') return false;
+  return true;
+}
+
+function deriveBorderValue(profile) {
+  const sides = {
+    top: profile.borderTop,
+    right: profile.borderRight,
+    bottom: profile.borderBottom,
+    left: profile.borderLeft,
+  };
+  const sideValues = Object.values(sides).filter(isMeaningfulColor);
+  if (!sideValues.length && isMeaningfulColor(profile.border)) {
+    return profile.border;
+  }
+  if (!sideValues.length) return null;
+
+  const uniqueSideValues = new Set(sideValues);
+  if (uniqueSideValues.size === 1) {
+    return sideValues[0];
+  }
+
+  const sideMap = {};
+  for (const [side, value] of Object.entries(sides)) {
+    if (isMeaningfulColor(value)) sideMap[side] = value;
+  }
+  return Object.keys(sideMap).length ? sideMap : null;
+}
+
+function buildCompactSelector(el) {
+  const tag = el.tagName.toLowerCase();
+  const safeEscape = (value) => {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(value);
+    }
+    return value.replace(/[^a-zA-Z0-9_-]/g, '_');
+  };
+
+  if (el.id) {
+    return `${tag}#${safeEscape(el.id)}`;
+  }
+
+  const classes = Array.from(el.classList)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((cls) => `.${safeEscape(cls)}`);
+  if (classes.length) {
+    return `${tag}${classes.join('')}`;
+  }
+
+  return buildShortCssPath(el, safeEscape);
+}
+
+function buildShortCssPath(el, escapeFn) {
+  const parts = [];
+  let current = el;
+  let depth = 0;
+
+  while (current && current.nodeType === Node.ELEMENT_NODE && depth < 3) {
+    const tag = current.tagName.toLowerCase();
+    let part = tag;
+
+    if (current.id) {
+      part = `${tag}#${escapeFn(current.id)}`;
+      parts.unshift(part);
+      break;
+    }
+
+    const cls = Array.from(current.classList).find(Boolean);
+    if (cls) {
+      part = `${tag}.${escapeFn(cls)}`;
+    } else if (current.parentElement) {
+      const siblings = Array.from(current.parentElement.children)
+        .filter((child) => child.tagName === current.tagName);
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1;
+        part = `${tag}:nth-of-type(${index})`;
+      }
+    }
+
+    parts.unshift(part);
+    current = current.parentElement;
+    depth += 1;
+  }
+
+  return parts.join(' > ');
 }

@@ -22,6 +22,15 @@ const MAX_CONTEXT_DOM_CHILDREN = 14;
 const MAX_CONTEXT_DOM_NODES_WITH_SCREENSHOT = 140;
 const MAX_CONTEXT_DOM_DEPTH_WITH_SCREENSHOT = 4;
 const MAX_CONTEXT_DOM_CHILDREN_WITH_SCREENSHOT = 10;
+const MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP = 110;
+const MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP = 3;
+const MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP = 8;
+const MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP_AND_SCREENSHOT = 70;
+const MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP_AND_SCREENSHOT = 2;
+const MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP_AND_SCREENSHOT = 6;
+const MAX_CONTEXT_COLOR_MAP_ENTRIES = 200;
+const MAX_CONTEXT_COLOR_MAP_SELECTOR_LENGTH = 180;
+const MAX_CONTEXT_COLOR_LIST = 120;
 const inFlightAutoGeneration = new Set();
 const KNOWN_MODEL_IDS = new Set(
   Object.values(PROVIDER_MODELS)
@@ -457,8 +466,13 @@ async function generateAndApplyDarkMode(tabId, options = {}) {
 
   let pageContext;
   try {
-    pageContext = await sendMessageToTabWithInjection(tabId, { type: 'extract-dom' });
-    log.info('generate', 'Extracted page context', { nodeCount: pageContext?.nodeCount, truncated: pageContext?.truncated, url: pageContext?.url });
+    pageContext = await extractPageContext(tabId);
+    log.info('generate', 'Extracted page context', {
+      nodeCount: pageContext?.nodeCount,
+      truncated: pageContext?.truncated,
+      colorMapEntries: Array.isArray(pageContext?.colorMap) ? pageContext.colorMap.length : 0,
+      url: pageContext?.url,
+    });
   } catch (_error) {
     log.error('generate', 'Failed to extract page context', { tabId });
     return { css: null, error: await getContentScriptUnavailableError(tabId) };
@@ -631,7 +645,7 @@ async function handleRefineDarkMode(message, sender) {
 
   let pageContext;
   try {
-    pageContext = await sendMessageToTabWithInjection(tabId, { type: 'extract-dom' });
+    pageContext = await extractPageContext(tabId);
   } catch (_error) {
     log.error('refine', 'Failed to extract page context');
     return { css: null, error: await getContentScriptUnavailableError(tabId) };
@@ -782,6 +796,9 @@ function buildDarkModeUserPrompt(
   const truncatedHint = safeContext.truncated
     ? 'Context is truncated. Prioritize robust selectors that cover main content, sidebars, discussion threads, editor textareas, preview regions, and quoted blocks.'
     : 'Context is complete enough to target specific components and states.';
+  const colorMapHint = Array.isArray(safeContext.colorMap) && safeContext.colorMap.length > 0
+    ? `Color map includes ${safeContext.colorMap.length} grouped selector profiles. Use colorMap as primary evidence for recoloring decisions.`
+    : 'Color map is unavailable; rely on compact DOM and component targeting.';
 
   const sections = [
     'Create CSS that applies a visually pleasing dark theme to this page context.',
@@ -794,6 +811,7 @@ function buildDarkModeUserPrompt(
     '- Include :hover, :focus, :active, :visited, and placeholder states where relevant.',
     '- Do not hide content or change spacing/layout dramatically.',
     'Context guidance:',
+    `- ${colorMapHint}`,
     `- ${truncatedHint}`,
   ];
 
@@ -816,6 +834,9 @@ function buildRefineUserPrompt({ pageContext, currentCss, feedback, feedbackImag
   const truncatedHint = safeContext.truncated
     ? 'Page context is truncated. Use resilient selectors and ensure full-surface coverage for sidebar/editor/preview/thread areas.'
     : 'Use the page context details to target specific problem components.';
+  const colorMapHint = Array.isArray(safeContext.colorMap) && safeContext.colorMap.length > 0
+    ? `Use the provided colorMap as the primary source of current page color usage (${safeContext.colorMap.length} grouped profiles).`
+    : 'Color map is unavailable; use compact DOM cues and screenshot evidence.';
   const textPrompt = [
     'Refine the existing dark mode CSS based on user feedback.',
     'Requirements:',
@@ -825,6 +846,7 @@ function buildRefineUserPrompt({ pageContext, currentCss, feedback, feedbackImag
     '- Ensure sidebars, comments, editor textareas, preview containers, and quotes are all covered.',
     '- Return a full replacement CSS stylesheet.',
     'Context guidance:',
+    `- ${colorMapHint}`,
     `- ${truncatedHint}`,
     'User feedback:',
     safeFeedback,
@@ -940,19 +962,54 @@ function sanitizeGenerationScreenshotDataUrl(dataUrl) {
 
 function buildContextJsonForPrompt(pageContext, { withScreenshot = false } = {}) {
   const safeContext = sanitizePageContext(pageContext);
+  const hasColorMap = Array.isArray(safeContext.colorMap) && safeContext.colorMap.length > 0;
+  const includeStyles = !withScreenshot && !hasColorMap;
+  const maxNodes = hasColorMap
+    ? (withScreenshot
+        ? MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP_AND_SCREENSHOT
+        : MAX_CONTEXT_DOM_NODES_WITH_COLOR_MAP)
+    : (withScreenshot ? MAX_CONTEXT_DOM_NODES_WITH_SCREENSHOT : MAX_CONTEXT_DOM_NODES);
+  const maxDepth = hasColorMap
+    ? (withScreenshot
+        ? MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP_AND_SCREENSHOT
+        : MAX_CONTEXT_DOM_DEPTH_WITH_COLOR_MAP)
+    : (withScreenshot ? MAX_CONTEXT_DOM_DEPTH_WITH_SCREENSHOT : MAX_CONTEXT_DOM_DEPTH);
+  const maxChildren = hasColorMap
+    ? (withScreenshot
+        ? MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP_AND_SCREENSHOT
+        : MAX_CONTEXT_DOM_CHILDREN_WITH_COLOR_MAP)
+    : (withScreenshot ? MAX_CONTEXT_DOM_CHILDREN_WITH_SCREENSHOT : MAX_CONTEXT_DOM_CHILDREN);
+
   const compactDom = compactDomNode(safeContext.dom, {
-    includeStyles: !withScreenshot,
-    maxNodes: withScreenshot ? MAX_CONTEXT_DOM_NODES_WITH_SCREENSHOT : MAX_CONTEXT_DOM_NODES,
-    maxDepth: withScreenshot ? MAX_CONTEXT_DOM_DEPTH_WITH_SCREENSHOT : MAX_CONTEXT_DOM_DEPTH,
-    maxChildren: withScreenshot
-      ? MAX_CONTEXT_DOM_CHILDREN_WITH_SCREENSHOT
-      : MAX_CONTEXT_DOM_CHILDREN,
+    includeStyles,
+    maxNodes,
+    maxDepth,
+    maxChildren,
   });
 
   return JSON.stringify({
     ...safeContext,
     dom: compactDom,
   });
+}
+
+async function extractPageContext(tabId) {
+  const [domResult, colorMapResult] = await Promise.allSettled([
+    sendMessageToTabWithInjection(tabId, { type: 'extract-dom' }),
+    sendMessageToTabWithInjection(tabId, { type: 'extract-color-map' }),
+  ]);
+
+  if (domResult.status !== 'fulfilled' && colorMapResult.status !== 'fulfilled') {
+    throw new Error('Unable to extract page context');
+  }
+
+  const context = isObject(domResult.value) ? { ...domResult.value } : {};
+  if (colorMapResult.status === 'fulfilled' && isObject(colorMapResult.value)) {
+    context.colorMap = colorMapResult.value.colorMap;
+    context.uniqueColors = colorMapResult.value.uniqueColors;
+  }
+
+  return context;
 }
 
 function compactDomNode(root, config) {
@@ -1043,6 +1100,12 @@ function sanitizePageContext(pageContext) {
       nodeCount: 0,
       truncated: true,
       dom: null,
+      colorMap: [],
+      uniqueColors: {
+        backgrounds: [],
+        text: [],
+        borders: [],
+      },
     };
   }
 
@@ -1061,6 +1124,8 @@ function sanitizePageContext(pageContext) {
     truncated: Boolean(pageContext.truncated),
     dom: pageContext.dom || null,
     customProperties: sanitizeCustomPropertiesContext(pageContext.customProperties),
+    colorMap: sanitizeColorMap(pageContext.colorMap),
+    uniqueColors: sanitizeUniqueColors(pageContext.uniqueColors),
   };
 }
 
@@ -1098,6 +1163,72 @@ function sanitizeCustomPropertiesContext(customProperties) {
     properties: sanitizedProperties,
     grouped: sanitizedGrouped,
   };
+}
+
+function sanitizeColorMap(colorMap) {
+  if (!Array.isArray(colorMap)) return [];
+
+  return colorMap
+    .slice(0, MAX_CONTEXT_COLOR_MAP_ENTRIES)
+    .map((entry) => sanitizeColorMapEntry(entry))
+    .filter(Boolean);
+}
+
+function sanitizeColorMapEntry(entry) {
+  if (!isObject(entry)) return null;
+  if (typeof entry.selector !== 'string' || !entry.selector.trim()) return null;
+
+  const out = {
+    selector: entry.selector.slice(0, MAX_CONTEXT_COLOR_MAP_SELECTOR_LENGTH),
+  };
+
+  const stringKeys = ['bg', 'color', 'fill', 'stroke'];
+  for (const key of stringKeys) {
+    if (typeof entry[key] === 'string' && entry[key]) {
+      out[key] = entry[key].slice(0, 40);
+    }
+  }
+
+  if (typeof entry.border === 'string' && entry.border) {
+    out.border = entry.border.slice(0, 40);
+  } else if (isObject(entry.border)) {
+    const border = {};
+    for (const side of ['top', 'right', 'bottom', 'left']) {
+      if (typeof entry.border[side] === 'string' && entry.border[side]) {
+        border[side] = entry.border[side].slice(0, 40);
+      }
+    }
+    if (Object.keys(border).length) out.border = border;
+  }
+
+  return out;
+}
+
+function sanitizeUniqueColors(uniqueColors) {
+  if (!isObject(uniqueColors)) {
+    return {
+      backgrounds: [],
+      text: [],
+      borders: [],
+    };
+  }
+
+  return {
+    backgrounds: sanitizeUniqueColorList(uniqueColors.backgrounds),
+    text: sanitizeUniqueColorList(uniqueColors.text),
+    borders: sanitizeUniqueColorList(uniqueColors.borders),
+  };
+}
+
+function sanitizeUniqueColorList(values) {
+  if (!Array.isArray(values)) return [];
+  const deduped = new Set();
+  for (const value of values) {
+    if (typeof value !== 'string' || !value) continue;
+    deduped.add(value.slice(0, 40));
+    if (deduped.size >= MAX_CONTEXT_COLOR_LIST) break;
+  }
+  return Array.from(deduped);
 }
 
 function extractCssFromModelText(text) {
