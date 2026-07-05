@@ -183,22 +183,72 @@
     refreshFromSettings(await getSettings());
   }
 
-  function parseRgb(color) {
-    const match = String(color).match(/rgba?\(([^)]+)\)/i);
-    if (!match) {
-      return null;
+  function parseColor(color) {
+    const value = String(color).trim();
+    const rgbMatch = value.match(/^rgba?\(([^)]+)\)$/i);
+    if (rgbMatch) {
+      return parseRgbChannels(rgbMatch[1]);
     }
 
-    const parts = match[1].split(",").map((part) => Number(part.trim()));
-    if (parts.length < 3 || parts.some((part, index) => index < 3 && !Number.isFinite(part))) {
+    const colorMatch = value.match(/^color\((srgb|display-p3)\s+([^)]+)\)$/i);
+    if (colorMatch) {
+      return parseColorFunctionChannels(colorMatch[2]);
+    }
+
+    return null;
+  }
+
+  function parseRgbChannels(value) {
+    if (value.includes(",")) {
+      const parts = value.split(",").map((part) => Number(part.trim()));
+      if (parts.length < 3 || parts.some((part, index) => index < 3 && !Number.isFinite(part))) {
+        return null;
+      }
+
+      return {
+        r: parts[0],
+        g: parts[1],
+        b: parts[2],
+        a: Number.isFinite(parts[3]) ? parts[3] : 1
+      };
+    }
+
+    const parts = splitModernColorChannels(value);
+    if (!parts || parts.rgb.some((part) => !Number.isFinite(part))) {
       return null;
     }
 
     return {
-      r: parts[0],
-      g: parts[1],
-      b: parts[2],
-      a: Number.isFinite(parts[3]) ? parts[3] : 1
+      r: parts.rgb[0],
+      g: parts.rgb[1],
+      b: parts.rgb[2],
+      a: Number.isFinite(parts.alpha) ? parts.alpha : 1
+    };
+  }
+
+  function parseColorFunctionChannels(value) {
+    const parts = splitModernColorChannels(value);
+    if (!parts || parts.rgb.some((part) => !Number.isFinite(part))) {
+      return null;
+    }
+
+    return {
+      r: parts.rgb[0] * 255,
+      g: parts.rgb[1] * 255,
+      b: parts.rgb[2] * 255,
+      a: Number.isFinite(parts.alpha) ? parts.alpha : 1
+    };
+  }
+
+  function splitModernColorChannels(value) {
+    const parts = value.trim().replace(/\s*\/\s*/g, " ").split(/\s+/).map((part) => Number(part));
+    if (parts.length < 3 || parts.length > 4) {
+      return null;
+    }
+
+    return {
+      rgb: parts.slice(0, 3),
+      alpha: parts[3]
     };
   }
 
@@ -220,12 +270,12 @@
     }
 
     try {
-      const bodyColor = document.body ? parseRgb(getComputedStyle(document.body).backgroundColor) : null;
+      const bodyColor = document.body ? parseColor(getComputedStyle(document.body).backgroundColor) : null;
       if (bodyColor && bodyColor.a !== 0) {
         return bodyColor;
       }
 
-      const htmlColor = document.documentElement ? parseRgb(getComputedStyle(document.documentElement).backgroundColor) : null;
+      const htmlColor = document.documentElement ? parseColor(getComputedStyle(document.documentElement).backgroundColor) : null;
       if (htmlColor && htmlColor.a !== 0) {
         return htmlColor;
       }
@@ -240,8 +290,8 @@
 
   function hasDarkColorSchemeMeta() {
     const meta = document.querySelector('meta[name="color-scheme" i]');
-    const content = meta ? meta.getAttribute("content") || "" : "";
-    return /\bdark\b/i.test(content) && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const content = (meta ? meta.getAttribute("content") || "" : "").trim().toLowerCase();
+    return (content === "dark" || content === "only dark") && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
   }
 
   function isNativelyDark() {
