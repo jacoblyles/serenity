@@ -1,0 +1,182 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #17191d;
+  color: #f2f5f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 280px;
+  margin: 0;
+  background: #17191d;
+}
+
+main {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.switch span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #3b414b;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.switch span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f2f5f7;
+  transition: transform 120ms ease;
+}
+
+.switch input:checked + span {
+  background: #4f8cff;
+}
+
+.switch input:checked + span::after {
+  transform: translateX(18px);
+}
+
+.origin,
+.status,
+footer {
+  margin: 0;
+  color: #b9c0ca;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.origin {
+  color: #f2f5f7;
+  overflow-wrap: anywhere;
+}
+
+.controls {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+legend {
+  padding: 0 0 7px;
+  color: #b9c0ca;
+  font-size: 12px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  overflow: hidden;
+  border: 1px solid #343942;
+  border-radius: 8px;
+}
+
+.segmented label {
+  min-width: 0;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+}
+
+.segmented span {
+  display: grid;
+  min-height: 34px;
+  place-items: center;
+  padding: 0 7px;
+  border-left: 1px solid #343942;
+  background: #20242b;
+  color: #cbd2dc;
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.segmented label:first-child span {
+  border-left: 0;
+}
+
+.segmented input:checked + span {
+  background: #4f8cff;
+  color: #fff;
+}
+
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  color: #dfe5eb;
+  font-size: 13px;
+}
+
+.slider-row input {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #4f8cff;
+}
+
+output {
+  color: #b9c0ca;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #3c4655;
+  border-radius: 8px;
+  background: #252b34;
+  color: #f2f5f7;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:disabled,
+fieldset:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

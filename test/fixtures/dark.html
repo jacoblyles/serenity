@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Serenity Fixture - Dark</title>
+    <style>
+      html {
+        background: #111;
+      }
+
+      body {
+        max-width: 720px;
+        margin: 48px auto;
+        padding: 0 24px;
+        background: transparent;
+        color: #e8edf2;
+        font: 16px/1.6 system-ui, sans-serif;
+      }
+
+      .panel {
+        padding: 18px;
+        border: 1px solid #333b45;
+        border-radius: 8px;
+        background: #1c222b;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Natively Dark Page</h1>
+    <div class="panel">
+      <p>This page should be detected as already dark in auto mode and left untouched.</p>
+      <p>After the first detection, reloading should skip Serenity immediately.</p>
+    </div>
+  </body>
+</html>
