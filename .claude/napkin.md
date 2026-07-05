@@ -36,8 +36,13 @@
 - Substack (user's key site) styles with wide-gamut colors: computed backgroundColor
   serializes as color(display-p3 ...) not rgb(). Any color parsing in this project must
   handle color(srgb|display-p3 ...) and space-separated rgb() (fixed 2026-07-05).
-- claude-in-chrome drives a separate automation Chrome profile: no user extensions, no
-  logins. Extension QA there requires the user to Load-unpack Serenity into that profile.
+- claude-in-chrome drives a separate automation Chrome context: no user extensions, no
+  logins. Serenity never injected there even after the user enabled Allow-in-Incognito —
+  unresolved; don't burn time on it. WORKING extension-QA path: playwright MCP
+  browser_run_code_unsafe with a script file under .playwright-mcp/ (allowed root). No
+  require() in that sandbox — get the launcher via page.context().browser().browserType()
+  and launchPersistentContext with --load-extension args. If the pinned chromium build is
+  missing from ~/Library/Caches/ms-playwright, symlink the nearest installed build number.
 - Detection verdicts cache in chrome.storage.local for 7 days; until serenity-eda lands
   there is no UI to clear a stale verdict (workaround: set site to Always on).
 - Project: "serenity" — Chrome extension (MV3) that auto-applies night mode to sites lacking one.
