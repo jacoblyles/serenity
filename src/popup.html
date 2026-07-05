@@ -10,15 +10,50 @@
     <main>
       <header>
         <h1>Serenity</h1>
+        <label class="switch" title="Toggle Serenity on all sites">
+          <input id="global-enabled" type="checkbox">
+          <span></span>
+        </label>
       </header>
 
-      <section class="panel">
-        <label class="toggle-row">
-          <span>Night mode</span>
-          <input id="global-enabled" type="checkbox" checked>
-        </label>
-        <p id="site-status">Current site controls will appear here.</p>
+      <section class="site">
+        <p id="origin" class="origin">Loading...</p>
+        <p id="status" class="status">Checking site settings.</p>
       </section>
+
+      <fieldset id="site-controls" class="controls">
+        <legend>Site mode</legend>
+        <div class="segmented" role="radiogroup" aria-label="Site mode">
+          <label>
+            <input type="radio" name="site-mode" value="auto">
+            <span>Auto</span>
+          </label>
+          <label>
+            <input type="radio" name="site-mode" value="on">
+            <span>Always on</span>
+          </label>
+          <label>
+            <input type="radio" name="site-mode" value="off">
+            <span>Off</span>
+          </label>
+        </div>
+
+        <div class="slider-row">
+          <label for="brightness">Brightness</label>
+          <output id="brightness-value" for="brightness">100%</output>
+          <input id="brightness" type="range" min="50" max="150" value="100">
+        </div>
+
+        <div class="slider-row">
+          <label for="contrast">Contrast</label>
+          <output id="contrast-value" for="contrast">100%</output>
+          <input id="contrast" type="range" min="50" max="150" value="100">
+        </div>
+
+        <button id="reset" type="button">Reset site adjustments</button>
+      </fieldset>
+
+      <footer>Version 0.1.0</footer>
     </main>
 
     <script src="settings.js"></script>

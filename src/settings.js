@@ -18,6 +18,11 @@
     return chrome.storage.local;
   }
 
+  function toPercent(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
   function mergeSettings(raw) {
     const settings = raw && typeof raw === "object" ? raw : {};
     const defaults = settings.defaults && typeof settings.defaults === "object" ? settings.defaults : {};
@@ -26,8 +31,8 @@
     return {
       globalEnabled: settings.globalEnabled !== false,
       defaults: {
-        brightness: Number.isFinite(defaults.brightness) ? defaults.brightness : DEFAULT_SETTINGS.defaults.brightness,
-        contrast: Number.isFinite(defaults.contrast) ? defaults.contrast : DEFAULT_SETTINGS.defaults.contrast
+        brightness: toPercent(defaults.brightness, DEFAULT_SETTINGS.defaults.brightness),
+        contrast: toPercent(defaults.contrast, DEFAULT_SETTINGS.defaults.contrast)
       },
       sites
     };
@@ -58,6 +63,11 @@
     const settings = await getSettings();
     const current = settings.sites[origin] || { mode: "auto" };
     settings.sites[origin] = Object.assign({}, current, patch);
+    Object.keys(settings.sites[origin]).forEach((key) => {
+      if (settings.sites[origin][key] === undefined) {
+        delete settings.sites[origin][key];
+      }
+    });
     await setSettings(settings);
     return settings.sites[origin];
   }
