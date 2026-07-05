@@ -11,7 +11,14 @@
 - Keep scope small; this is intended as a relatively small project.
 
 ## Patterns That Work
-- (approaches that succeeded)
+- Codex worker via Maniple with detailed per-task pebbles produced good v1 quality in one
+  pass (~800 lines, clean structure); review still found 2 real bugs the specs didn't
+  anticipate (detection reading our own injected background; picture+img double filter).
+  Detailed specs + a real review round is the right division of labor.
+- Merging a worker branch: .pebbles/events.jsonl always conflicts and NEITHER side is a
+  superset (worker's pb writes enriched close events to its branch copy AND plain ones to
+  the shared store). Resolve by union + dedupe exact lines + stable sort by timestamp,
+  then validate with `pb list --all`.
 
 ## Tool/Environment Notes
 - Maniple + codex workers: wait_idle_workers reports idle almost immediately
