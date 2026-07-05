@@ -39,6 +39,18 @@
         border-radius: 6px;
         background: #e9eef6;
       }
+
+      .app-surface {
+        grid-column: 1 / -1;
+      }
+
+      #app-canvas {
+        width: min(90vw, 100%);
+        max-width: none;
+        height: 80vh;
+        min-height: 360px;
+        object-fit: initial;
+      }
     </style>
   </head>
   <body>
@@ -63,6 +75,10 @@
         <canvas id="sample" width="280" height="160"></canvas>
         <figcaption>Canvas drawing should be counter-inverted.</figcaption>
       </figure>
+      <figure class="app-surface">
+        <canvas id="app-canvas" width="1200" height="800"></canvas>
+        <figcaption>Large app canvas should inherit page inversion and render dark.</figcaption>
+      </figure>
       <figure>
         <svg viewBox="0 0 280 160" role="img" aria-label="Inline SVG icons">
           <rect width="280" height="160" fill="#f8fbff"></rect>
@@ -85,6 +101,20 @@
       context.fillStyle = "#1d3557";
       context.font = "bold 36px system-ui";
       context.fillText("Canvas", 70, 92);
+
+      const appCanvas = document.getElementById("app-canvas");
+      const appContext = appCanvas.getContext("2d");
+      appContext.fillStyle = "#ffffff";
+      appContext.fillRect(0, 0, 1200, 800);
+      appContext.fillStyle = "#111111";
+      appContext.fillRect(120, 120, 960, 2);
+      appContext.fillRect(120, 210, 820, 2);
+      appContext.fillRect(120, 300, 920, 2);
+      appContext.fillRect(120, 390, 760, 2);
+      appContext.font = "bold 64px system-ui";
+      appContext.fillText("Document canvas", 120, 90);
+      appContext.font = "36px system-ui";
+      appContext.fillText("This large white writing surface should turn dark.", 120, 180);
     </script>
   </body>
 </html>

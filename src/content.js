@@ -4,6 +4,9 @@
   const STYLE_ID = "serenity-style";
   const CACHE_PREFIX = "serenity:settings:";
   const DETECTION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  const APP_CANVAS_VIEWPORT_RATIO = 0.3;
+  const APP_CANVAS_SCAN_DELAY_MS = 250;
+  const APP_CANVAS_ATTRIBUTE = "data-serenity-app-canvas";
   const DEFAULT_SETTINGS = {
     globalEnabled: true,
     defaults: {
@@ -16,6 +19,9 @@
 
   const origin = window.location.origin;
   let currentSettings = readCachedSettings();
+  let appCanvasObserver = null;
+  let appCanvasScanTimer = 0;
+  let appCanvasTrackingActive = false;
 
   function storageArea() {
     if (chrome.storage && chrome.storage.sync) {
@@ -144,13 +150,21 @@
       "img, video, canvas, embed, object {",
       "  filter: invert(1) hue-rotate(180deg) !important;",
       "}",
+      "canvas[data-serenity-app-canvas] {",
+      "  filter: none !important;",
+      "}",
       ":root {",
       "  color-scheme: dark !important;",
       "}"
     ].join("\n");
+
+    startAppCanvasTracking();
+    tagAppCanvasesIfReady();
   }
 
   function removeTheme() {
+    stopAppCanvasTracking();
+
     const style = document.getElementById(STYLE_ID);
     if (style) {
       style.remove();
@@ -166,6 +180,98 @@
     }
 
     return style;
+  }
+
+  function tagAppCanvasesIfReady() {
+    if (document.readyState === "interactive" || document.readyState === "complete") {
+      tagAppCanvases();
+    }
+  }
+
+  function tagAppCanvases() {
+    const viewportArea = window.innerWidth * window.innerHeight;
+    const threshold = APP_CANVAS_VIEWPORT_RATIO * viewportArea;
+
+    document.querySelectorAll("canvas").forEach((canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      const canvasArea = rect.width * rect.height;
+
+      if (viewportArea > 0 && rect.width > 0 && rect.height > 0 && canvasArea >= threshold) {
+        canvas.setAttribute(APP_CANVAS_ATTRIBUTE, "");
+      } else {
+        canvas.removeAttribute(APP_CANVAS_ATTRIBUTE);
+      }
+    });
+  }
+
+  function startAppCanvasTracking() {
+    if (!appCanvasTrackingActive) {
+      appCanvasTrackingActive = true;
+      document.addEventListener("DOMContentLoaded", tagAppCanvases);
+      window.addEventListener("load", tagAppCanvases);
+      window.addEventListener("resize", scheduleAppCanvasScan);
+      connectAppCanvasObserver();
+    }
+  }
+
+  function stopAppCanvasTracking() {
+    if (!appCanvasTrackingActive) {
+      return;
+    }
+
+    appCanvasTrackingActive = false;
+    document.removeEventListener("DOMContentLoaded", tagAppCanvases);
+    window.removeEventListener("load", tagAppCanvases);
+    window.removeEventListener("resize", scheduleAppCanvasScan);
+
+    if (appCanvasObserver) {
+      appCanvasObserver.disconnect();
+      appCanvasObserver = null;
+    }
+
+    if (appCanvasScanTimer) {
+      window.clearTimeout(appCanvasScanTimer);
+      appCanvasScanTimer = 0;
+    }
+  }
+
+  function connectAppCanvasObserver() {
+    if (appCanvasObserver || !document.documentElement) {
+      return;
+    }
+
+    appCanvasObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => Array.prototype.some.call(mutation.addedNodes, nodeContainsCanvas))) {
+        scheduleAppCanvasScan();
+      }
+    });
+
+    appCanvasObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  function nodeContainsCanvas(node) {
+    if (!node || (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE)) {
+      return false;
+    }
+
+    return node.localName === "canvas" || Boolean(node.querySelector && node.querySelector("canvas"));
+  }
+
+  function scheduleAppCanvasScan() {
+    if (!appCanvasTrackingActive || appCanvasScanTimer) {
+      return;
+    }
+
+    appCanvasScanTimer = window.setTimeout(() => {
+      appCanvasScanTimer = 0;
+
+      if (appCanvasTrackingActive) {
+        tagAppCanvases();
+      }
+    }, APP_CANVAS_SCAN_DELAY_MS);
   }
 
   function refreshFromSettings(settings) {
