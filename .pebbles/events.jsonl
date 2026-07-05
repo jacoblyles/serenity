@@ -56,3 +56,6 @@
 {"type":"dep_add","timestamp":"2026-07-05T19:58:33.490129Z","issue_id":"serenity-9b0.8","payload":{"dep_type":"parent-child","depends_on":"serenity-9b0"}}
 {"type":"status_update","timestamp":"2026-07-05T19:59:03.193665Z","issue_id":"serenity-9b0.8","payload":{"status":"in_progress"}}
 {"type":"close","timestamp":"2026-07-05T20:00:11.083796Z","issue_id":"serenity-9b0.8","payload":{}}
+{"type":"create","timestamp":"2026-07-05T20:01:34.887507Z","issue_id":"serenity-eda","payload":{"description":"UX gap found after fixing detection bugs: a stale false-positive detection (detections[origin] in chrome.storage.local) keeps suppressing the theme for up to 7 days even after the detector itself is fixed or the page changes. Fix: (1) whenever the user changes the site tri-state in the popup, delete detections[origin] so auto mode re-evaluates on next load; (2) optionally add a small 'Re-check site' link in the popup that clears the entry and reloads the tab. Keep it minimal.","priority":"3","title":"Clear/re-run dark detection when site mode changes; popup re-check action","type":"task"}}
+{"type":"rename","timestamp":"2026-07-05T20:01:34.944137Z","issue_id":"serenity-eda","payload":{"new_id":"serenity-9b0.9"}}
+{"type":"dep_add","timestamp":"2026-07-05T20:01:34.944142Z","issue_id":"serenity-9b0.9","payload":{"dep_type":"parent-child","depends_on":"serenity-9b0"}}
