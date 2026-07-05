@@ -7,7 +7,8 @@
       brightness: 100,
       contrast: 100
     },
-    sites: {}
+    sites: {},
+    detections: {}
   };
 
   function storageArea() {
@@ -16,6 +17,10 @@
     }
 
     return chrome.storage.local;
+  }
+
+  function detectionStorageArea() {
+    return chrome.storage && chrome.storage.local ? chrome.storage.local : storageArea();
   }
 
   function toPercent(value, fallback) {
@@ -27,6 +32,7 @@
     const settings = raw && typeof raw === "object" ? raw : {};
     const defaults = settings.defaults && typeof settings.defaults === "object" ? settings.defaults : {};
     const sites = settings.sites && typeof settings.sites === "object" ? settings.sites : {};
+    const detections = settings.detections && typeof settings.detections === "object" ? settings.detections : {};
 
     return {
       globalEnabled: settings.globalEnabled !== false,
@@ -34,14 +40,17 @@
         brightness: toPercent(defaults.brightness, DEFAULT_SETTINGS.defaults.brightness),
         contrast: toPercent(defaults.contrast, DEFAULT_SETTINGS.defaults.contrast)
       },
-      sites
+      sites,
+      detections
     };
   }
 
   function getSettings() {
     return new Promise((resolve) => {
       storageArea().get(DEFAULT_SETTINGS, (items) => {
-        resolve(mergeSettings(items));
+        detectionStorageArea().get({ detections: {} }, (detectionItems) => {
+          resolve(mergeSettings(Object.assign({}, items, { detections: detectionItems.detections || {} })));
+        });
       });
     });
   }
@@ -50,7 +59,16 @@
     const merged = mergeSettings(settings);
 
     return new Promise((resolve) => {
-      storageArea().set(merged, resolve);
+      storageArea().set(
+        {
+          globalEnabled: merged.globalEnabled,
+          defaults: merged.defaults,
+          sites: merged.sites
+        },
+        () => {
+          resolve(!chrome.runtime.lastError);
+        }
+      );
     });
   }
 
@@ -64,7 +82,7 @@
     const current = settings.sites[origin] || { mode: "auto" };
     settings.sites[origin] = Object.assign({}, current, patch);
     Object.keys(settings.sites[origin]).forEach((key) => {
-      if (settings.sites[origin][key] === undefined) {
+      if (settings.sites[origin][key] === undefined || key === "detectedDark") {
         delete settings.sites[origin][key];
       }
     });

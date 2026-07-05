@@ -58,14 +58,9 @@
     return Number.isFinite(Number(site[key])) ? Number(site[key]) : settings.defaults[key];
   }
 
-  function hasFreshDarkDetection(site) {
-    const detected = site.detectedDark;
-    return Boolean(
-      detected &&
-        detected.value === true &&
-        Number.isFinite(detected.ts) &&
-        Date.now() - detected.ts < DETECTION_TTL_MS
-    );
+  function hasFreshDarkDetection() {
+    const ts = Number(settings.detections[activeOrigin]);
+    return Number.isFinite(ts) && Date.now() - ts < DETECTION_TTL_MS;
   }
 
   function statusLabel(site) {
@@ -77,7 +72,7 @@
       return "Forced on";
     }
 
-    if (hasFreshDarkDetection(site)) {
+    if (hasFreshDarkDetection()) {
       return "Skipped - site is already dark";
     }
 

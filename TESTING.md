@@ -23,7 +23,7 @@ Detection is per origin, so all fixtures served from `localhost:8000` share the 
 
 - `light.html`: page renders dark in Auto or Always on, with readable text, links, forms, and no white flash.
 - `dark.html`: page is auto-skipped as already dark; on a second visit there should be no initial inversion flash.
-- `media.html`: images, video poster, and canvas colors look natural; inline SVG icons invert with page text.
+- `media.html`: image and picture colors look natural, video poster and canvas are counter-inverted, and inline SVG icons invert with page text.
 - `fixed.html`: fixed header remains pinned and sticky sidebar behaves while scrolling.
 - `frame.html`: embedded `light.html` and `dark.html` frames are inverted only once by the top-frame root filter.
 

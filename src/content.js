@@ -10,7 +10,8 @@
       brightness: 100,
       contrast: 100
     },
-    sites: {}
+    sites: {},
+    detections: {}
   };
 
   const origin = window.location.origin;
@@ -22,6 +23,10 @@
     }
 
     return chrome.storage.local;
+  }
+
+  function detectionStorageArea() {
+    return chrome.storage && chrome.storage.local ? chrome.storage.local : storageArea();
   }
 
   function readCachedSettings() {
@@ -45,6 +50,7 @@
     const settings = raw && typeof raw === "object" ? raw : {};
     const defaults = settings.defaults && typeof settings.defaults === "object" ? settings.defaults : {};
     const sites = settings.sites && typeof settings.sites === "object" ? settings.sites : {};
+    const detections = settings.detections && typeof settings.detections === "object" ? settings.detections : {};
 
     return {
       globalEnabled: settings.globalEnabled !== false,
@@ -52,7 +58,8 @@
         brightness: toPercent(defaults.brightness, DEFAULT_SETTINGS.defaults.brightness),
         contrast: toPercent(defaults.contrast, DEFAULT_SETTINGS.defaults.contrast)
       },
-      sites
+      sites,
+      detections
     };
   }
 
@@ -65,14 +72,9 @@
     return settings.sites[origin] || { mode: "auto" };
   }
 
-  function hasFreshDarkDetection(site) {
-    const detected = site.detectedDark;
-    return Boolean(
-      detected &&
-        detected.value === true &&
-        Number.isFinite(detected.ts) &&
-        Date.now() - detected.ts < DETECTION_TTL_MS
-    );
+  function hasFreshDarkDetection(settings) {
+    const ts = Number(settings.detections[origin]);
+    return Number.isFinite(ts) && Date.now() - ts < DETECTION_TTL_MS;
   }
 
   function getEffectiveConfig(settings) {
@@ -87,20 +89,44 @@
   function shouldApply(settings) {
     const site = getSiteConfig(settings);
     const mode = site.mode || "auto";
-    return settings.globalEnabled !== false && mode !== "off" && !(mode === "auto" && hasFreshDarkDetection(site));
+    return settings.globalEnabled !== false && mode !== "off" && !(mode === "auto" && hasFreshDarkDetection(settings));
   }
 
   function getSettings() {
     return new Promise((resolve) => {
       storageArea().get(DEFAULT_SETTINGS, (items) => {
-        resolve(normalizeSettings(items));
+        detectionStorageArea().get({ detections: {} }, (detectionItems) => {
+          resolve(normalizeSettings(Object.assign({}, items, { detections: detectionItems.detections || {} })));
+        });
       });
     });
   }
 
   function setSettings(settings) {
     return new Promise((resolve) => {
-      storageArea().set(normalizeSettings(settings), resolve);
+      const normalized = normalizeSettings(settings);
+      storageArea().set(
+        {
+          globalEnabled: normalized.globalEnabled,
+          defaults: normalized.defaults,
+          sites: normalized.sites
+        },
+        () => {
+          resolve(!chrome.runtime.lastError);
+        }
+      );
+    });
+  }
+
+  function setDetection(originKey, ts) {
+    return new Promise((resolve) => {
+      detectionStorageArea().get({ detections: {} }, (items) => {
+        const detections = items.detections && typeof items.detections === "object" ? items.detections : {};
+        detections[originKey] = ts;
+        detectionStorageArea().set({ detections }, () => {
+          resolve(!chrome.runtime.lastError);
+        });
+      });
     });
   }
 
@@ -115,7 +141,7 @@
       `  filter: invert(1) hue-rotate(180deg) brightness(${brightness}) contrast(${contrast}) !important;`,
       "  background: #fff !important;",
       "}",
-      "img, picture, video, canvas, embed, object {",
+      "img, video, canvas, embed, object {",
       "  filter: invert(1) hue-rotate(180deg) !important;",
       "}",
       ":root {",
@@ -186,17 +212,30 @@
   }
 
   function effectiveBackgroundColor() {
-    const bodyColor = document.body ? parseRgb(getComputedStyle(document.body).backgroundColor) : null;
-    if (bodyColor && bodyColor.a !== 0) {
-      return bodyColor;
+    const style = document.getElementById(STYLE_ID);
+    const wasDisabled = style ? style.disabled : false;
+
+    if (style) {
+      style.disabled = true;
     }
 
-    const htmlColor = document.documentElement ? parseRgb(getComputedStyle(document.documentElement).backgroundColor) : null;
-    if (htmlColor && htmlColor.a !== 0) {
-      return htmlColor;
-    }
+    try {
+      const bodyColor = document.body ? parseRgb(getComputedStyle(document.body).backgroundColor) : null;
+      if (bodyColor && bodyColor.a !== 0) {
+        return bodyColor;
+      }
 
-    return { r: 255, g: 255, b: 255, a: 1 };
+      const htmlColor = document.documentElement ? parseRgb(getComputedStyle(document.documentElement).backgroundColor) : null;
+      if (htmlColor && htmlColor.a !== 0) {
+        return htmlColor;
+      }
+
+      return { r: 255, g: 255, b: 255, a: 1 };
+    } finally {
+      if (style) {
+        style.disabled = wasDisabled;
+      }
+    }
   }
 
   function hasDarkColorSchemeMeta() {
@@ -221,14 +260,9 @@
       return;
     }
 
-    settings.sites[origin] = Object.assign({}, site, {
-      detectedDark: {
-        value: true,
-        ts: Date.now()
-      }
-    });
-
-    await setSettings(settings);
+    const ts = Date.now();
+    settings.detections[origin] = ts;
+    await setDetection(origin, ts);
     refreshFromSettings(settings);
   }
 
