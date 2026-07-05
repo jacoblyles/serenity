@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Serenity Fixture - Fixed Layout</title>
+    <style>
+      body {
+        margin: 0;
+        background: #fff;
+        color: #222;
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+
+      header {
+        position: fixed;
+        z-index: 2;
+        top: 0;
+        right: 0;
+        left: 0;
+        padding: 14px 24px;
+        background: #f2f5f9;
+        border-bottom: 1px solid #d6dde8;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: 28px;
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 86px 24px 60px;
+      }
+
+      aside {
+        position: sticky;
+        top: 76px;
+        align-self: start;
+        padding: 14px;
+        background: #eef3fa;
+        border-radius: 8px;
+      }
+
+      article p {
+        min-height: 160px;
+        margin: 0 0 22px;
+        padding: 18px;
+        background: #fff;
+        border: 1px solid #dce3ec;
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Fixed header should stay pinned while scrolling.</header>
+    <main>
+      <aside>Sticky sidebar should remain aligned beneath the header.</aside>
+      <article>
+        <p>Scroll block 1. Serenity applies a root filter, which can affect containing-block behavior on some pages.</p>
+        <p>Scroll block 2. Verify the fixed header does not jump or detach.</p>
+        <p>Scroll block 3. Verify the sticky sidebar continues to stick.</p>
+        <p>Scroll block 4. Long content keeps the page scrollable.</p>
+        <p>Scroll block 5. End of fixture.</p>
+      </article>
+    </main>
+  </body>
+</html>

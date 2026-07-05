@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Serenity Fixture - Media</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #fafafa;
+        color: #20242a;
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 20px;
+      }
+
+      figure {
+        margin: 0;
+        padding: 14px;
+        border: 1px solid #d8dee7;
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      img,
+      video,
+      canvas,
+      svg {
+        display: block;
+        width: 100%;
+        max-width: 280px;
+        height: 160px;
+        object-fit: cover;
+        border-radius: 6px;
+        background: #e9eef6;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Media Counter-Inversion</h1>
+    <div class="grid">
+      <figure>
+        <img alt="Color bands" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 280 160'%3E%3Crect width='280' height='160' fill='%23f4e4c1'/%3E%3Ccircle cx='70' cy='80' r='42' fill='%23e94f37'/%3E%3Ccircle cx='140' cy='80' r='42' fill='%233f88c5'/%3E%3Ccircle cx='210' cy='80' r='42' fill='%2344af69'/%3E%3C/svg%3E">
+        <figcaption>Image colors should look natural.</figcaption>
+      </figure>
+      <figure>
+        <video controls poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 280 160'%3E%3Crect width='280' height='160' fill='%2320262e'/%3E%3Cpolygon points='120,52 120,108 170,80' fill='%23ffffff'/%3E%3C/svg%3E"></video>
+        <figcaption>Video poster and controls should remain usable.</figcaption>
+      </figure>
+      <figure>
+        <canvas id="sample" width="280" height="160"></canvas>
+        <figcaption>Canvas drawing should be counter-inverted.</figcaption>
+      </figure>
+      <figure>
+        <svg viewBox="0 0 280 160" role="img" aria-label="Inline SVG icons">
+          <rect width="280" height="160" fill="#f8fbff"></rect>
+          <path d="M78 112 48 82l14-14 16 16 44-44 14 14z" fill="#278a45"></path>
+          <circle cx="196" cy="80" r="42" fill="#4f8cff"></circle>
+          <path d="M196 48v64M164 80h64" stroke="#fff" stroke-width="12" stroke-linecap="round"></path>
+        </svg>
+        <figcaption>Inline SVG should invert with page text.</figcaption>
+      </figure>
+    </div>
+    <script>
+      const canvas = document.getElementById("sample");
+      const context = canvas.getContext("2d");
+      const gradient = context.createLinearGradient(0, 0, 280, 0);
+      gradient.addColorStop(0, "#f45b69");
+      gradient.addColorStop(0.5, "#ffd166");
+      gradient.addColorStop(1, "#06d6a0");
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, 280, 160);
+      context.fillStyle = "#1d3557";
+      context.font = "bold 36px system-ui";
+      context.fillText("Canvas", 70, 92);
+    </script>
+  </body>
+</html>

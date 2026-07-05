@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Serenity Fixture - Light</title>
+    <style>
+      body {
+        max-width: 760px;
+        margin: 48px auto;
+        padding: 0 24px;
+        background: #fff;
+        color: #222;
+        font: 17px/1.6 Georgia, serif;
+      }
+
+      a {
+        color: #0645ad;
+      }
+
+      blockquote {
+        margin: 24px 0;
+        padding: 16px 20px;
+        border-left: 4px solid #c8d4e2;
+        background: #f4f7fb;
+      }
+
+      input,
+      button {
+        font: inherit;
+        padding: 8px 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Light Article</h1>
+    <p>This page uses a plain white background and dark text. Serenity should invert it into a dark reading surface without a white flash.</p>
+    <p><a href="#">Links</a>, form controls, and quoted sections should remain readable.</p>
+    <blockquote>Default-light paint should become dark because the extension forces the root background before inversion.</blockquote>
+    <form>
+      <label>
+        Search
+        <input type="search" value="serenity">
+      </label>
+      <button type="button">Submit</button>
+    </form>
+  </body>
+</html>
