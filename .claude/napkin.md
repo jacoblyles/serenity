@@ -33,6 +33,13 @@
 - Caching LLM-generated stylesheets per site with a regenerate button: also didn't work well (user tried it).
 
 ## Domain Notes
+- Substack (user's key site) styles with wide-gamut colors: computed backgroundColor
+  serializes as color(display-p3 ...) not rgb(). Any color parsing in this project must
+  handle color(srgb|display-p3 ...) and space-separated rgb() (fixed 2026-07-05).
+- claude-in-chrome drives a separate automation Chrome profile: no user extensions, no
+  logins. Extension QA there requires the user to Load-unpack Serenity into that profile.
+- Detection verdicts cache in chrome.storage.local for 7 days; until serenity-eda lands
+  there is no UI to clear a stale verdict (workaround: set site to Always on).
 - Project: "serenity" — Chrome extension (MV3) that auto-applies night mode to sites lacking one.
 - Chosen approach (2026-07-05): deterministic, local CSS transformation — no LLM at runtime.
   Core engine = invert(1) hue-rotate(180deg) filter on html with counter-inversion for
